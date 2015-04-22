@@ -103,18 +103,16 @@ def simple_schema_gen(extract_file_names, mongo_uri, schema_db_name, schema_coll
   execute(command)
 
 
-def mr_schema_gen(extract_file_names, mongo_uri, schema_db_name, schema_collection_name, tmp_path):
+def mr_schema_gen(extract_file_names, mongo_uri, schema_db_name, schema_collection_name):
 
-  execute("hadoop fs -rm -r onefold_mongo")
-  execute("hadoop fs -rm -r onefold_mongo_output")
+  execute("hadoop fs -rm -r -f onefold_mongo")
+  execute("hadoop fs -rm -r -f onefold_mongo_output")
 
   execute("hadoop fs -mkdir onefold_mongo")
   for extract_file_name in extract_file_names:
-    execute("hadoop fs -copyFromLocal %s/%s onefold_mongo/" % (tmp_path, extract_file_name))
+    execute("hadoop fs -copyFromLocal %s onefold_mongo/" % (extract_file_name))
 
   hadoop_command = """hadoop jar /usr/hdp/2.2.0.0-2041/hadoop-mapreduce/hadoop-streaming.jar \
-                            -D mapred.reduce.max.attempts=0 \
-                            -D mapred.map.max.attempts=0 \
                             -D mapred.job.name="onefold-mongo-generate-schema" \
                             -input onefold_mongo -output onefold_mongo_output \
                             -mapper 'json/generate-schema-mapper.py' \
@@ -148,7 +146,7 @@ def main():
 
   # generate schema
   if args.use_mr:
-    mr_schema_gen(extract_file_names, args.mongo, args.schema_db, args.schema_collection, args.tmp_path)
+    mr_schema_gen(extract_file_names, args.mongo, args.schema_db, args.schema_collection)
   else:
     simple_schema_gen(extract_file_names, args.mongo, args.schema_db, args.schema_collection)
 
