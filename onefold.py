@@ -11,7 +11,31 @@ import time
 import random
 
 NUM_RECORDS_PER_PART = 5
+HDFS_PATH = '/user/hadoop/onefold_mongo'
 
+# global params
+mongo_uri = None
+db_name = None
+collection_name = None
+extract_query = None
+tmp_path = None
+schema_db_name = None
+schema_collection_name = None
+use_mr = False
+
+# global variables
+extract_file_names = []
+
+# default mapreduce params
+mapreduce_params = {}
+mapreduce_params["mapred.reduce.max.attempts"] = "0"
+mapreduce_params["mapred.map.max.attempts"] = "0"
+mapreduce_params["mapred.task.timeout"] = "12000000"
+mapreduce_params["mapred.tasktracker.map.tasks.maximum"] = "2"
+mapreduce_params["mapred.tasktracker.reduce.tasks.maximum"] = "2"
+mapreduce_params["mapred.map.tasks"] = "10"
+mapreduce_params["mapred.reduce.tasks"] = "10"
+mapreduce_params_str = ' '.join(["-D %s=%s"%(k,v) for k,v in mapreduce_params.iteritems()])
 
 def execute(command, ignore_error=False, retry=False, subpress_output=False):
 
@@ -51,7 +75,7 @@ def execute(command, ignore_error=False, retry=False, subpress_output=False):
     print "Retries exceeded (%s times). Throwing exception.." % num_retries
     raise Exception ("Retries exceeded (%s times) when executing this command." % num_retries)
 
-def extract_data(mongo_uri, db_name, collection_name, query, tmp_path):
+def extract_data():
 
   # create tmp_path folder if necessary
   if not os.path.exists(os.path.join(tmp_path, collection_name, 'data')):
@@ -65,7 +89,6 @@ def extract_data(mongo_uri, db_name, collection_name, query, tmp_path):
   # some state variables
   part_num = 0
   extract_file = None
-  extract_file_names = []
 
   # start mongo client
   client = MongoClient(mongo_uri)
@@ -74,7 +97,7 @@ def extract_data(mongo_uri, db_name, collection_name, query, tmp_path):
 
   # iterate through the collection
   index = 0
-  for data in collection.find(query):
+  for data in collection.find(extract_query):
 
     # open a new file if necessary
     if index % NUM_RECORDS_PER_PART == 0:
@@ -97,16 +120,16 @@ def extract_data(mongo_uri, db_name, collection_name, query, tmp_path):
   return extract_file_names
 
 
-def simple_schema_gen(extract_file_names, mongo_uri, schema_db_name, schema_collection_name):
-  command = "cat %s | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py %s/%s/%s" \
+def simple_schema_gen():
+  command = "cat %s | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py %s/%s/%s > /dev/null" \
             % (' '.join(extract_file_names), mongo_uri, schema_db_name, schema_collection_name)
   execute(command)
 
 
-def mr_schema_gen(extract_file_names, collection_name, mongo_uri, schema_db_name, schema_collection_name):
+def mr_schema_gen():
 
-  hdfs_data_folder = "onefold_mongo/%s/data" % collection_name
-  hdfs_mr_output_folder = "onefold_mongo/%s/schema_gen/output" % collection_name
+  hdfs_data_folder = "%s/%s/data" % (HDFS_PATH, collection_name)
+  hdfs_mr_output_folder = "%s/%s/schema_gen/output" % (HDFS_PATH, collection_name)
 
   # delete folders
   execute("hadoop fs -rm -r -f %s" % hdfs_data_folder)
@@ -119,23 +142,54 @@ def mr_schema_gen(extract_file_names, collection_name, mongo_uri, schema_db_name
 
   hadoop_command = """hadoop jar /usr/hdp/2.2.0.0-2041/hadoop-mapreduce/hadoop-streaming.jar \
                             -D mapred.job.name="onefold-mongo-generate-schema" \
+                            %s \
                             -input %s -output %s \
                             -mapper 'json/generate-schema-mapper.py' \
                             -reducer 'json/generate-schema-reducer.py %s/%s/%s' \
                             -file json/generate-schema-mapper.py \
                             -file json/generate-schema-reducer.py
-  """ % (hdfs_data_folder, hdfs_mr_output_folder, mongo_uri, schema_db_name, schema_collection_name)
+  """ % (mapreduce_params_str, hdfs_data_folder, hdfs_mr_output_folder, mongo_uri, schema_db_name, schema_collection_name)
   execute(hadoop_command)
 
 
-def simple_data_prep(extract_file_names, mongo_uri, schema_db_name, schema_collection_name, tmp_path):
-  command = "cat %s | json/combine-data-mapper.py | sort | json/combine-data-reducer.py %s/%s/%s" \
-            % (' '.join(extract_file_names), mongo_uri, schema_db_name, schema_collection_name)
+def simple_data_transform():
+
+  transform_data_tmp_path = "%s/%s/output" % (tmp_path, collection_name)
+
+  command = "cat %s | json/transform-data-mapper.py %s/%s/%s,%s > /dev/null" \
+            % (' '.join(extract_file_names), mongo_uri, schema_db_name,
+               schema_collection_name, transform_data_tmp_path)
   execute(command)
 
-def load_hive(schema_db_name, schema_collection_name):
 
-  pass
+def mr_data_transform():
+
+  hdfs_data_folder = "%s/%s/data" % (HDFS_PATH, collection_name)
+  hdfs_mr_output_folder = "%s/%s/data_transform/output" % (HDFS_PATH, collection_name)
+  # transform_data_tmp_path = "%s/%s/output" % (tmp_path, collection_name)
+
+  # delete folders
+  execute("hadoop fs -rm -r -f %s" % hdfs_mr_output_folder)
+
+
+  hadoop_command = """hadoop jar /usr/hdp/2.2.0.0-2041/hadoop-mapreduce/hadoop-streaming.jar \
+                            -libjars java/MapReduce/target/MapReduce-0.0.1-SNAPSHOT.jar \
+                            -D mapred.job.name="onefold-mongo-transform-data" \
+                            %s \
+                            -input %s -output %s \
+                            -mapper 'json/transform-data-mapper.py %s/%s/%s' \
+                            -reducer 'cat' \
+                            -file json/transform-data-mapper.py \
+                            -outputformat com.onefold.hadoop.MapReduce.TransformDataMultiOutputFormat
+  """ % (mapreduce_params_str, hdfs_data_folder, hdfs_mr_output_folder, mongo_uri, schema_db_name, schema_collection_name)
+  execute(hadoop_command)
+
+
+def load_hive():
+  if use_mr:
+    mr_data_transform()
+  else:
+    simple_data_transform()
 
 
 def usage():
@@ -147,8 +201,6 @@ def main():
 
   # parse command line
   parser = argparse.ArgumentParser(description='Generate schema for MongoDB collections.')
-  parser.add_argument('command', metavar='command', type=str,
-                     help='Command: schema_gen / load_hive')
   parser.add_argument('--mongo', metavar='mongo', type=str, help='MongoDB connectivity')
   parser.add_argument('--source_db', metavar='source_db', type=str, help='Source MongoDB database name')
   parser.add_argument('--source_collection', metavar='source_collection', type=str, help='Source MongoDB collection name')
@@ -158,19 +210,28 @@ def main():
   parser.add_argument('--schema_collection', metavar='schema_collection', type=str, help='MongoDB collection name to store schema')
   parser.add_argument('--use_mr', action='store_true')
   args = parser.parse_args()
-  command = args.command
+
+  global mongo_uri, db_name, collection_name, extract_query, tmp_path, schema_db_name, schema_collection_name, use_mr
+  mongo_uri = args.mongo
+  db_name = args.source_db
+  collection_name = args.source_collection
+  extract_query = args.query
+  tmp_path = args.tmp_path
+  schema_db_name = args.schema_db
+  schema_collection_name = args.schema_collection
+  if args.use_mr:
+    use_mr = args.use_mr
 
   # extract data from Mongo
-  extract_file_names = extract_data(args.mongo, args.source_db, args.source_collection, args.query, args.tmp_path)
+  extract_data()
 
-  if command == 'schema_gen':
-    # generate schema
-    if args.use_mr:
-      mr_schema_gen(extract_file_names, args.source_collection, args.mongo, args.schema_db, args.schema_collection)
-    else:
-      simple_schema_gen(extract_file_names, args.mongo, args.schema_db, args.schema_collection)
-  elif command == 'load_hive':
-    load_hive(args.schema_db, args.schema_collection)
+  # generate schema
+  if use_mr:
+    mr_schema_gen()
+  else:
+    simple_schema_gen()
+
+  load_hive()
 
 if __name__ == '__main__':
   main()

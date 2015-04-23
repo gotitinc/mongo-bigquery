@@ -8,7 +8,6 @@ import socket
 import subprocess
 import codecs
 import hashlib
-import pprint
 from pymongo import MongoClient
 
 # create utf reader and writer for stdin and stdout
@@ -32,6 +31,7 @@ tmp_path = None
 
 # create file descriptors
 file_descriptors = {}
+
 
 def clean_data(line, line_num, parent = None, parent_hash_code = None, is_array = False):
   new_data = {}
@@ -310,8 +310,8 @@ def clean_data(line, line_num, parent = None, parent_hash_code = None, is_array 
 
   return new_data_fragments
 
-def get_shard_value(data, shard_key):
 
+def get_shard_value(data, shard_key):
   # split shard key by "."
   tmp = data
   shard_key_parts = shard_key.split(".")
@@ -333,6 +333,8 @@ def get_shard_value(data, shard_key):
     shard_value = re.sub("[^0-9a-zA-Z_]", '_', shard_value).lower()
     return shard_value
 
+
+# creating folder and opening file (for local mode)
 def create_file_descriptor(fragment_value, shard_value = None):
   # generate unique local file
   local_file_name = '%s_%s' % (socket.gethostbyname(socket.gethostname()), os.getpid())
@@ -341,13 +343,14 @@ def create_file_descriptor(fragment_value, shard_value = None):
   if shard_value != None:
     path = fragment_value + "/" + shard_value
 
-  # creating folder and opening file
-  execute('mkdir %s/%s' % (tmp_path, path), ignore_error=True)
+  # creating folder and opening file (for local mode)
+  execute('mkdir -p %s/%s' % (tmp_path, path), ignore_error=True)
   file_name = '%s/%s/%s' % (tmp_path, path, local_file_name)
   print >> error_stream, "Opening file descriptor %s" % file_name
   file = open(file_name, 'w')
   file_descriptors[path] = {"file": file, "file_name": file_name}
   print >> error_stream, "Opened file descriptor %s" % file_name
+
 
 def process_line(line, line_num):
   # clean data
@@ -360,21 +363,27 @@ def process_line(line, line_num):
   # handle other fragments
   for fragment_value, fragment_content in data_fragments.iteritems():
 
-    # open local file descriptor for this fragment
-    if fragment_value not in file_descriptors:
-      create_file_descriptor(fragment_value)
-
-    file = file_descriptors[fragment_value]["file"]
+    # open local file descriptor for this fragment (for local mode only)
+    if tmp_path != None:
+      if fragment_value not in file_descriptors:
+        create_file_descriptor(fragment_value)
+      file = file_descriptors[fragment_value]["file"]
 
     if isinstance(fragment_content, list):
       for element in fragment_content:
-        # write data to local file
-        file.write(json.dumps(element))
-        file.write('\n')
+        if tmp_path != None:
+          # write data to local file
+          file.write(json.dumps(element))
+          file.write('\n')
+        else:
+          print >> output_stream, "%s\t%s" % (fragment_value, json.dumps(element))
     else:
-      # write data to local file
-      file.write(json.dumps(fragment_content))
-      file.write('\n')
+      if tmp_path != None:
+        # write data to local file
+        file.write(json.dumps(fragment_content))
+        file.write('\n')
+      else:
+        print >> output_stream, "%s\t%s" % (fragment_value, json.dumps(fragment_content))
 
 
 def execute(command, ignore_error=False):
@@ -385,42 +394,32 @@ def execute(command, ignore_error=False):
       raise Exception("Error executing command: %s" % command)
 
 
-def usage():
-  print "Usage: %s mongodb://[host]:[port]/[db_name]/[schema_collection_name],[hdfs_output_path],[tmp_path]" % sys.argv[0]
-  sys.exit(2)
-
-
 def main(argv):
 
-  if len(argv) < 0:
-    usage()
+  # parse parameters
+  global tmp_path, mongo_schema_collection
 
-  try:
+  args = argv[0].split(",")
+  schema_arg = args[0]
+  if len(args) > 1:
+    tmp_path = args[1]
 
-    global tmp_path, mongo_schema_collection
+  schema_args = schema_arg.split("/")
+  schema_collection_name = schema_args[-1]
+  schema_db_name = schema_args[-2]
+  mongo_uri = '/'.join(schema_args[0:-2])
 
-    args = argv[0].split(",")
-    schema_arg = args[0]
-    output_path = args[1]
-    tmp_path = args[2]
+  client = MongoClient(mongo_uri)
+  db = client[schema_db_name]
 
-    schema_args = schema_arg.split("/")
-    schema_collection_name = schema_args[-1]
-    schema_db_name = schema_args[-2]
-    mongo_uri = '/'.join(schema_args[0:-2])
-
-    client = MongoClient(mongo_uri)
-    db = client[schema_db_name]
-
-    mongo_schema_collection = db[schema_collection_name]
-
-  except ValueError:
-    usage()
+  mongo_schema_collection = db[schema_collection_name]
 
   # create tmp folder to store file
-  execute('rm -rf %s' % tmp_path, ignore_error=True)
-  execute('mkdir %s' % tmp_path, ignore_error=True)
+  if tmp_path != None:
+    execute('rm -rf %s' % tmp_path, ignore_error=True)
+    execute('mkdir %s' % tmp_path, ignore_error=True)
 
+  # read schema from MongoDB
   global schema, process_array, shard_key
 
   # read schema from mongodb server
@@ -445,7 +444,6 @@ def main(argv):
     # print something to stderr and stdout every 1000 lines
     if line_num % 1000 == 0:
       print >> error_stream, "Processed %i lines." % line_num
-      print "Processed %i lines." % line_num
 
   print >> error_stream, "Finished writing to local files."
 
@@ -456,26 +454,14 @@ def main(argv):
     # close file
     file_descriptor["file"].close()
 
-    # copy files to output folder in HDFS
-    if output_path != '':
-
-      hdfs_fragment_path = output_path + '/' + fragment_value + '/'
-
-      # create HDFS output folder if necessary
-      if output_path != '':
-        print "Creating HDFS fragment path %s if necessary" % hdfs_fragment_path
-        execute("hadoop fs -mkdir -p %s" % hdfs_fragment_path)
-
-      execute("hadoop fs -copyFromLocal %s %s" % (file_descriptor["file_name"], hdfs_fragment_path))
-
     # write fragment values to mongodb
-    print >> output_stream, "Adding fragment value %s to mongodb." % (fragment_value)
+    print >> error_stream, "Adding fragment value %s to mongodb." % (fragment_value)
     mongo_schema_collection.update({"type": "fragments"}, {"$addToSet": {"fragments": fragment_value}}, upsert = True);
 
   for shard_value in shard_values:
     # write shard values to mongodb
     if shard_key is not None:
-      print >>  output_stream, "Adding shard value %s to mongodb." % (shard_value)
+      print >> error_stream, "Adding shard value %s to mongodb." % (shard_value)
       mongo_schema_collection.update({"type": "shards"}, {"$addToSet": {"shards": shard_value}}, upsert = True);
 
 
