@@ -3,20 +3,19 @@
 import re
 import sys
 import json
-import redis
 import os
 import socket
 import subprocess
 import codecs
 import hashlib
 import pprint
+from pymongo import MongoClient
 
 # create utf reader and writer for stdin and stdout
 output_stream = codecs.getwriter("utf-8")(sys.stdout)
 input_stream = codecs.getreader("utf-8")(sys.stdin, errors="ignore")
 error_stream = codecs.getwriter("utf-8")(sys.stderr)
 
-redis_server = None
 process_array = "child_table"
 shard_key = None
 
@@ -24,16 +23,17 @@ BATCH_SIZE = 10000
 BATCH_NUM_LINES = 50000
 
 # e.g. schema['event'] = 'string-nullable'
+mongo_schema_collection = None
 schema = {}
 shard_values = []
 
 # params
-app_id = None
+tmp_path = None
 
 # create file descriptors
 file_descriptors = {}
 
-def clean_data(line, line_num, app_id, parent = None, parent_hash_code = None, is_array = False):
+def clean_data(line, line_num, parent = None, parent_hash_code = None, is_array = False):
   new_data = {}
   new_data_fragments = {}
 
@@ -124,7 +124,7 @@ def clean_data(line, line_num, app_id, parent = None, parent_hash_code = None, i
                   new_data_fragments[full_key] = []
 
                 for v in value:
-                  t = clean_data(json.dumps(v, ensure_ascii=False), line_num, app_id, full_key, hash_code, True)
+                  t = clean_data(json.dumps(v, ensure_ascii=False), line_num, full_key, hash_code, True)
 
                   for fragment, fragment_content in t.iteritems():
                     if fragment == 'root':
@@ -141,7 +141,7 @@ def clean_data(line, line_num, app_id, parent = None, parent_hash_code = None, i
               print >> error_stream, "Line %i: Expect record but found %s. Data: %s" % (line_num, value, line)
               return None
             else:
-              t = clean_data(json.dumps(value, ensure_ascii=False), line_num, app_id, full_key)
+              t = clean_data(json.dumps(value, ensure_ascii=False), line_num, full_key)
 
               for fragment, fragment_content in t.iteritems():
                 if fragment == 'root':
@@ -342,16 +342,16 @@ def create_file_descriptor(fragment_value, shard_value = None):
     path = fragment_value + "/" + shard_value
 
   # creating folder and opening file
-  execute('mkdir /hadoop/tmp/mr4/%s' % path, ignore_error=True)
-  file_name = '/hadoop/tmp/mr4/%s/%s' % (path, local_file_name)
+  execute('mkdir %s/%s' % (tmp_path, path), ignore_error=True)
+  file_name = '%s/%s/%s' % (tmp_path, path, local_file_name)
   print >> error_stream, "Opening file descriptor %s" % file_name
   file = open(file_name, 'w')
   file_descriptors[path] = {"file": file, "file_name": file_name}
   print >> error_stream, "Opened file descriptor %s" % file_name
 
-def process_line(line, line_num, app_id):
+def process_line(line, line_num):
   # clean data
-  data_fragments = clean_data(line, line_num, app_id, None)
+  data_fragments = clean_data(line, line_num, None)
 
   # skip if data is not clean..
   if data_fragments is None or len(data_fragments) == 0:
@@ -377,11 +377,6 @@ def process_line(line, line_num, app_id):
       file.write('\n')
 
 
-def usage():
-  print >> error_stream, "Usage: %s [env],[app-id],[gs_output_path]" % sys.argv[0]
-  sys.exit(2)
-
-
 def execute(command, ignore_error=False):
   print >> error_stream, 'Executing command: %s' % command
   if subprocess.call(command, shell=True):
@@ -390,64 +385,61 @@ def execute(command, ignore_error=False):
       raise Exception("Error executing command: %s" % command)
 
 
+def usage():
+  print "Usage: %s mongodb://[host]:[port]/[db_name]/[schema_collection_name],[hdfs_output_path],[tmp_path]" % sys.argv[0]
+  sys.exit(2)
+
+
 def main(argv):
-  # create tmp folder to store file
-  execute('mkdir /hadoop/tmp/mr4', ignore_error=True)
 
-  # generate unique local file
-  local_file_name = '%s_%s' % (socket.gethostbyname(socket.gethostname()), os.getpid())
-
-  # creating folder
-  execute('mkdir /hadoop/tmp/mr4/output', ignore_error=True)
-  file_name = '/hadoop/tmp/mr4/output/%s' % (local_file_name)
-  print >> error_stream, "Opening file descriptor %s" % file_name
-
-  # open local file for output
-  global file
-  file = open(file_name, 'w')
-  print >> error_stream, "Opened file descriptor %s" % file_name
-
-  global redis_server, app_id, schema, process_array, shard_key
-
-  if len(argv) < 1:
+  if len(argv) < 0:
     usage()
 
   try:
+
+    global tmp_path, mongo_schema_collection
+
     args = argv[0].split(",")
-    env = args[0]
-    app_id = args[1]
-    gs_output_path = args[2]
+    schema_arg = args[0]
+    output_path = args[1]
+    tmp_path = args[2]
+
+    schema_args = schema_arg.split("/")
+    schema_collection_name = schema_args[-1]
+    schema_db_name = schema_args[-2]
+    mongo_uri = '/'.join(schema_args[0:-2])
+
+    client = MongoClient(mongo_uri)
+    db = client[schema_db_name]
+
+    mongo_schema_collection = db[schema_collection_name]
+
   except ValueError:
     usage()
 
-  if env == 'staging':
-    redis_server = redis.StrictRedis(host='pub-redis-18269.us-central1-1-1.gce.garantiadata.com', port=18269, db=0,
-                                     password='Origami')
-  elif env == 'production':
-    redis_server = redis.StrictRedis(host='pub-redis-10588.us-central1-1-1.gce.garantiadata.com', port=10588, db=0,
-                                     password='Origami')
-  elif env == 'development':
-    redis_server = redis.StrictRedis(host='pub-redis-19920.us-central1-1-1.gce.garantiadata.com', port=19920, db=0,
-                                     password='Origami')
+  # create tmp folder to store file
+  execute('rm -rf %s' % tmp_path, ignore_error=True)
+  execute('mkdir %s' % tmp_path, ignore_error=True)
 
-  if app_id is None or gs_output_path is None:
-    usage()
+  global schema, process_array, shard_key
 
-  # read schema from redis server
-  schema = redis_server.hgetall('%s/schema' % app_id)
+  # read schema from mongodb server
+  schema_fields = mongo_schema_collection.find({"type": "field"})
+  for schema_field in schema_fields:
+    schema[schema_field['key']] = schema_field['data_type']
 
   # read process_array from redis
-  if redis_server.hget('%s/policy' % app_id, "process_array") != None:
-    process_array = redis_server.hget('%s/policy' % app_id, "process_array")
-
-  # read shard_key from redis
-  if redis_server.hget('%s/policy' % app_id, "shard_key") != None:
-    shard_key = redis_server.hget('%s/policy' % app_id, "shard_key")
+  # if redis_server.hget('%s/policy' % app_id, "process_array") != None:
+  #   process_array = redis_server.hget('%s/policy' % app_id, "process_array")
+  #
+  # # read shard_key from redis
+  # if redis_server.hget('%s/policy' % app_id, "shard_key") != None:
+  #   shard_key = redis_server.hget('%s/policy' % app_id, "shard_key")
 
   # process input
   line_num = 1
   for line in input_stream:
-    process_line(line, line_num, app_id)
+    process_line(line, line_num)
     line_num += 1
 
     # print something to stderr and stdout every 1000 lines
@@ -464,20 +456,27 @@ def main(argv):
     # close file
     file_descriptor["file"].close()
 
-    # copy files to GCS
-    command = "until gsutil cp %s %s; do echo 'GCS Copy failed. Sleeping for 10 seconds then retry.' && sleep 10; done" \
-              % (file_descriptor["file_name"], gs_output_path + '/' + fragment_value + '/')
-    execute(command)
+    # copy files to output folder in HDFS
+    if output_path != '':
 
-    # write fragment values to redis
-    print >> output_stream, "Adding fragment value %s to redis." % (fragment_value)
-    redis_server.sadd("%s/fragments" % app_id, fragment_value)
+      hdfs_fragment_path = output_path + '/' + fragment_value + '/'
+
+      # create HDFS output folder if necessary
+      if output_path != '':
+        print "Creating HDFS fragment path %s if necessary" % hdfs_fragment_path
+        execute("hadoop fs -mkdir -p %s" % hdfs_fragment_path)
+
+      execute("hadoop fs -copyFromLocal %s %s" % (file_descriptor["file_name"], hdfs_fragment_path))
+
+    # write fragment values to mongodb
+    print >> output_stream, "Adding fragment value %s to mongodb." % (fragment_value)
+    mongo_schema_collection.update({"type": "fragments"}, {"$addToSet": {"fragments": fragment_value}}, upsert = True);
 
   for shard_value in shard_values:
-    # write shard values to redis
+    # write shard values to mongodb
     if shard_key is not None:
-      print >>  output_stream, "Adding shard value %s to redis." % (shard_value)
-      redis_server.sadd("%s/shards" % app_id, shard_value)
+      print >>  output_stream, "Adding shard value %s to mongodb." % (shard_value)
+      mongo_schema_collection.update({"type": "shards"}, {"$addToSet": {"shards": shard_value}}, upsert = True);
 
 
 if __name__ == "__main__":

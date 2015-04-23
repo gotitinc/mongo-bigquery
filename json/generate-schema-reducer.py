@@ -16,18 +16,18 @@ def process_new_field(key, datatype):
 
   if key is not None and datatype is not None:
     # check if key is already in redis
-    orig_datatype = mongo_schema_collection.find_one({"key": key})
+    orig_datatype = mongo_schema_collection.find_one({"key": key, "type": "field"})
 
     # compare orig data type and save schema to redis
     if orig_datatype is not None:
       if 'forced' not in orig_datatype:
         new_datatype = max_datatype(orig_datatype, datatype)
         print key, new_datatype
-        mongo_schema_collection.find_one_and_update({"key": key}, {"$set": {"data_type": new_datatype}})
+        mongo_schema_collection.find_one_and_update({"key": key, "type": "field"}, {"$set": {"data_type": new_datatype}})
 
     else:
       print key, datatype
-      mongo_schema_collection.insert_one({"key": key, "data_type": datatype})
+      mongo_schema_collection.insert_one({"key": key, "type": "field", "data_type": datatype})
 
 
 def max_datatype (datatype1, datatype2):
