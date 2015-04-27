@@ -41,6 +41,14 @@ def process_line(line, line_num, parent=None, seperator="_"):
 
       k = re.sub("[^0-9a-zA-Z_]", '_', key).lower()
 
+      # BigQuery disallows field to start with non alpha
+      if ord(k[0]) >= 48 and ord(k[0]) <= 59:
+        k = "_f" + k
+
+      # Hive disallows field to start with "_"
+      if k[0] == '_':
+        k = k.lstrip("_")
+
       if parent == None:
         full_key = k
       else:

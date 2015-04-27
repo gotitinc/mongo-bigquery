@@ -78,6 +78,10 @@ def clean_data(line, line_num, parent = None, parent_hash_code = None, is_array 
       if ord(k[0]) >= 48 and ord(k[0]) <= 59:
         k = "_f" + k
 
+      # Hive disallows field to start with "_"
+      if k[0] == '_':
+        k = k.lstrip("_")
+
       if parent == None:
         full_key = k
         dict_key = full_key
@@ -336,8 +340,6 @@ def get_shard_value(data, shard_key):
 
 # creating folder and opening file (for local mode)
 def create_file_descriptor(fragment_value, shard_value = None):
-  # generate unique local file
-  local_file_name = '%s_%s' % (socket.gethostbyname(socket.gethostname()), os.getpid())
 
   path = fragment_value
   if shard_value != None:
@@ -345,7 +347,7 @@ def create_file_descriptor(fragment_value, shard_value = None):
 
   # creating folder and opening file (for local mode)
   execute('mkdir -p %s/%s' % (tmp_path, path), ignore_error=True)
-  file_name = '%s/%s/%s' % (tmp_path, path, local_file_name)
+  file_name = '%s/%s/part-00000' % (tmp_path, path)
   print >> error_stream, "Opening file descriptor %s" % file_name
   file = open(file_name, 'w')
   file_descriptors[path] = {"file": file, "file_name": file_name}
@@ -414,10 +416,9 @@ def main(argv):
 
   mongo_schema_collection = db[schema_collection_name]
 
-  # create tmp folder to store file
+  # delete temp folder if already exist (only for local mode)
   if tmp_path != None:
     execute('rm -rf %s' % tmp_path, ignore_error=True)
-    execute('mkdir %s' % tmp_path, ignore_error=True)
 
   # read schema from MongoDB
   global schema, process_array, shard_key
@@ -456,13 +457,13 @@ def main(argv):
 
     # write fragment values to mongodb
     print >> error_stream, "Adding fragment value %s to mongodb." % (fragment_value)
-    mongo_schema_collection.update({"type": "fragments"}, {"$addToSet": {"fragments": fragment_value}}, upsert = True);
+    mongo_schema_collection.update_one({"type": "fragments"}, {"$addToSet": {"fragments": fragment_value}}, upsert = True);
 
   for shard_value in shard_values:
     # write shard values to mongodb
     if shard_key is not None:
       print >> error_stream, "Adding shard value %s to mongodb." % (shard_value)
-      mongo_schema_collection.update({"type": "shards"}, {"$addToSet": {"shards": shard_value}}, upsert = True);
+      mongo_schema_collection.update_one({"type": "shards"}, {"$addToSet": {"shards": shard_value}}, upsert = True);
 
 
 if __name__ == "__main__":

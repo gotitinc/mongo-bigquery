@@ -15,11 +15,12 @@ mongo_schema_collection = None
 def process_new_field(key, datatype):
 
   if key is not None and datatype is not None:
-    # check if key is already in redis
-    orig_datatype = mongo_schema_collection.find_one({"key": key, "type": "field"})
+    # check if key is already in mongodb
+    orig_datatype_record = mongo_schema_collection.find_one({"key": key, "type": "field"})
 
-    # compare orig data type and save schema to redis
-    if orig_datatype is not None:
+    # compare orig data type and save schema to mongodb
+    if orig_datatype_record is not None:
+      orig_datatype = orig_datatype_record['data_type']
       if 'forced' not in orig_datatype:
         new_datatype = max_datatype(orig_datatype, datatype)
         print key, new_datatype
