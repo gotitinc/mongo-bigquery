@@ -2,6 +2,7 @@ import json
 import abc
 import re
 from sets import Set
+import pprint
 
 
 class DataWarehouse:
@@ -465,32 +466,32 @@ class Hive(DataWarehouse):
       if data_type is not None:
         if field['mode'] == 'repeated':
           if process_array == "child_table":
-            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
             column_name = "value"
           else:
             continue
         else:
           if "." in field['name']:
             if process_array == "child_table":
-              table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+              child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
               column_name = field['name'].rsplit(".",1)[1]
-              # print "  Child Table column:" + column_name
+              print "  Child Table column:" + column_name
             else:
-              table_name = table_name
+              child_table_name = table_name
               column_name = field['name'].split(".",1)[0]
               data_type = "string"
-              # print "  Inline column:" + column_name
+              print "  Inline column:" + column_name
           else:
-            table_name = table_name
+            child_table_name = table_name
             column_name = field['name']
 
-        if table_name not in table_columns:
-          table_columns[table_name] = Set()
-          if table_name != table_name:
-            table_columns[table_name].add("%s %s" % ("parent_hash_code", "string"))
-            table_columns[table_name].add("%s %s" % ("hash_code", "string"))
+        if child_table_name not in table_columns:
+          table_columns[child_table_name] = Set()
+          if child_table_name != table_name:
+            table_columns[child_table_name].add("%s %s" % ("parent_hash_code", "string"))
+            table_columns[child_table_name].add("%s %s" % ("hash_code", "string"))
 
-        table_columns[table_name].add("%s %s" % (column_name, data_type))
+        table_columns[child_table_name].add("%s %s" % (column_name, data_type))
 
     for table_name, columns in table_columns.iteritems():
       sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
@@ -506,7 +507,7 @@ class Hive(DataWarehouse):
     self.flatten(schema, fields, None)
 
     # current columns
-    table_names = self.list_tables("", "", table_name)
+    table_names = self.list_tables(database_name, table_name)
     current_table_columns = {}
     for table_name in table_names:
       current_columns = {}
@@ -543,47 +544,47 @@ class Hive(DataWarehouse):
       if sql_data_type is not None:
 
         if field['mode'] == 'repeated':
-          table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+          child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
           column_name = "value"
         else:
           if "." in field['name']:
-            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
             column_name = field['name'].rsplit(".",1)[1]
           else:
-            table_name = table_name
+            child_table_name = table_name
             column_name = field['name']
 
         # print "column name %s" % column_name
-        if table_name in current_table_columns:
-          current_columns = current_table_columns[table_name]
+        if child_table_name in current_table_columns:
+          current_columns = current_table_columns[child_table_name]
           if column_name in current_columns:
-            # print "  column %s found in current table schema." % column_name
+            print "  column %s found in current table schema." % column_name
             if field['type'].lower() != current_columns[column_name].lower():
-              # print "  but data type is different. new: %s old: %s" % (field['type'], current_columns[column_name])
-              if table_name not in modify_instructions:
-                modify_instructions[table_name] = {}
-              modify_instructions[table_name][column_name] = sql_data_type
+              print "  but data type is different. new: %s old: %s" % (field['type'], current_columns[column_name])
+              if child_table_name not in modify_instructions:
+                modify_instructions[child_table_name] = {}
+              modify_instructions[child_table_name][column_name] = sql_data_type
             else:
-              # print "  data type is same.. no-op."
+              print "  data type is same.. no-op."
               pass
           else:
-            # print "  column %s not found in current table schema." % column_name
-            alter_sqls.append ("alter table %s add columns (%s %s)" % (table_name, column_name, sql_data_type))
+            print "  column %s not found in current table schema." % column_name
+            alter_sqls.append ("alter table %s add columns (%s %s)" % (child_table_name, column_name, sql_data_type))
 
         else:
           # new table needed
-          if table_name not in new_table_columns:
-            new_table_columns[table_name] = []
-            new_table_columns[table_name].append("%s %s" % ("parent_hash_code", "string"))
-            new_table_columns[table_name].append("%s %s" % ("hash_code", "string"))
-          new_table_columns[table_name].append("%s %s" % (column_name, sql_data_type))
+          if child_table_name not in new_table_columns:
+            new_table_columns[child_table_name] = []
+            new_table_columns[child_table_name].append("%s %s" % ("parent_hash_code", "string"))
+            new_table_columns[child_table_name].append("%s %s" % ("hash_code", "string"))
+          new_table_columns[child_table_name].append("%s %s" % (column_name, sql_data_type))
 
     # generate sqls to modify column data type
     modify_sqls = []
-    for table_name, modify_columns in modify_instructions.iteritems():
+    for child_table_name, modify_columns in modify_instructions.iteritems():
 
       for modify_column_name, data_type in modify_columns.iteritems():
-        modify_sqls.append("alter table %s change %s %s %s" % (table_name, modify_column_name, modify_column_name, data_type))
+        modify_sqls.append("alter table %s change %s %s %s" % (child_table_name, modify_column_name, modify_column_name, data_type))
 
     for sql in modify_sqls:
       self.execute_sql(database_name, sql)
@@ -591,8 +592,8 @@ class Hive(DataWarehouse):
     for sql in alter_sqls:
       self.execute_sql(database_name, sql)
 
-    for table_name, columns in new_table_columns.iteritems():
-      sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
+    for child_table_name, columns in new_table_columns.iteritems():
+      sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (child_table_name, ",".join(columns))
       self.execute_sql(database_name, sql)
 
     return {}

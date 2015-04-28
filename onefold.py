@@ -9,7 +9,7 @@ import codecs
 import pprint
 import json
 from onefold_util import execute
-from dw_util import Hive, Redshift
+from dw_util import Hive
 
 
 NUM_RECORDS_PER_PART = 5
@@ -46,7 +46,7 @@ class Loader:
   dw_table_name = None
   dw = None
 
-  # mongo client
+  # mongo client and schema collection
   mongo_client = None
   mongo_schema_collection = None
 
@@ -62,6 +62,10 @@ class Loader:
     # open schema collection
     mongo_schema_db = self.mongo_client[self.schema_db_name]
     self.mongo_schema_collection = mongo_schema_db[self.schema_collection_name]
+
+    # if overwrite, delete schema collection
+    if self.write_disposition == 'overwrite':
+      self.mongo_schema_collection.remove({})
 
     # create data warehouse object
     self.dw = Hive(self.hiveserveer_host, self.hiveserver_port, HIVE_SERDES_LIB)
@@ -277,7 +281,7 @@ class Loader:
     else:
       full_table_name = "%s" % (table_name)
 
-    hdfs_path = "onefold_mongo/uber_events/data_transform/output/%s/" % shard_value
+    hdfs_path = "%s/%s/data_transform/output/%s/" % (HDFS_PATH, self.collection_name, shard_value)
     self.dw.load_table(self.dw_database_name, full_table_name, hdfs_path)
 
     # extract bq_job_id and save to db
@@ -354,16 +358,23 @@ def main():
   parser = argparse.ArgumentParser(description='Generate schema for MongoDB collections.')
   parser.add_argument('--mongo', metavar='mongo', type=str, required=True, help='MongoDB connectivity')
   parser.add_argument('--source_db', metavar='source_db', type=str, required=True, help='Source MongoDB database name')
-  parser.add_argument('--source_collection', metavar='source_collection', type=str, required=True, help='Source MongoDB collection name')
+  parser.add_argument('--source_collection', metavar='source_collection', type=str, required=True,
+                      help='Source MongoDB collection name')
   parser.add_argument('--query', metavar='query', type=str, help='[Optional] Query for filtering, etc.')
-  parser.add_argument('--tmp_path', metavar='tmp_path', type=str, help='Path to store tmp file from extraction.', default=TMP_PATH)
-  parser.add_argument('--schema_db', metavar='schema_db', type=str, help='MongoDB database name to store schema. If not provided, default to source db.')
-  parser.add_argument('--schema_collection', metavar='schema_collection', type=str, help='MongoDB collection name to store schema. If not provided, default to [source_collection]_schema')
-  parser.add_argument('--write_disposition', metavar='write_disposition', type=str, help='overwrite or append. Default is overwrite', default='overwrite')
+  parser.add_argument('--tmp_path', metavar='tmp_path', type=str, help='Path to store tmp file from extraction.',
+                      default=TMP_PATH)
+  parser.add_argument('--schema_db', metavar='schema_db', type=str,
+                      help='MongoDB database name to store schema. If not provided, default to source db.')
+  parser.add_argument('--schema_collection', metavar='schema_collection', type=str,
+                      help='MongoDB collection name to store schema. If not provided, default to [source_collection]_schema')
+  parser.add_argument('--write_disposition', metavar='write_disposition', type=str,
+                      help='overwrite or append. Default is overwrite', default='overwrite', choices=['overwrite', 'append'])
   parser.add_argument('--hiveserver_host', metavar='hiveserver_host', type=str, required=True, help='Hiveserver host')
   parser.add_argument('--hiveserver_port', metavar='hiveserver_port', type=str, required=True, help='Hiveserver port')
-  parser.add_argument('--hive_db_name', metavar='hive_db_name', type=str, help='Hive database name. If not provided, default to \'default\' hive database.')
-  parser.add_argument('--hive_table_name', metavar='hive_table_name', type=str, help='Hive table name. If not provided, default to source collection name.')
+  parser.add_argument('--hive_db_name', metavar='hive_db_name', type=str,
+                      help='Hive database name. If not provided, default to \'default\' hive database.')
+  parser.add_argument('--hive_table_name', metavar='hive_table_name', type=str,
+                      help='Hive table name. If not provided, default to source collection name.')
   parser.add_argument('--use_mr', action='store_true')
   args = parser.parse_args()
 
