@@ -40,10 +40,9 @@ class Loader:
   hiveserveer_host = None
   hiveserver_port = None
 
-  write_disposition = 'overwrite'
+  write_disposition = None
   process_array = "child_table"
-  project_id = ''
-  dataset_id = ''
+  dw_database_name = ''
   dw_table_name = None
   dw = None
 
@@ -56,9 +55,6 @@ class Loader:
 
 
   def initialize(self):
-
-    # use collection name as dw_table_name for now.
-    self.dw_table_name = self.collection_name
 
     # open mongo client
     self.mongo_client = MongoClient(self.mongo_uri)
@@ -276,17 +272,13 @@ class Loader:
     # else:
     #   gcs_uri = "%s/data/%s/*" % (self.mr4_output_folder_uri, shard_value)
 
-    if table_name == None:
-      full_table_name = "%s" % (self.appInfo.table_id)
+    if different_table_per_shard:
+      full_table_name = "%s_%s" % (table_name, shard_value)
     else:
-      if different_table_per_shard:
-        full_table_name = "%s_%s" % (table_name, shard_value)
-      else:
-        full_table_name = "%s" % (table_name)
+      full_table_name = "%s" % (table_name)
 
     hdfs_path = "onefold_mongo/uber_events/data_transform/output/%s/" % shard_value
-    sql = "load data inpath '%s*' into table %s" % (hdfs_path, full_table_name)
-    self.dw.execute_sql(sql, fetch_result = False)
+    self.dw.load_table(self.dw_database_name, full_table_name, hdfs_path)
 
     # extract bq_job_id and save to db
     return "%s/%s" % (data_import_id, shard_value)
@@ -304,16 +296,16 @@ class Loader:
 
     # create tables
     if self.write_disposition == 'overwrite':
-      if self.dw.table_exists(self.project_id, self.dataset_id, self.dw_table_name):
-        self.dw.delete_table(self.project_id, self.dataset_id, self.dw_table_name)
-      self.dw.create_table(self.project_id, self.dataset_id, self.dw_table_name, schema_file_name, self.process_array)
+      if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
+        self.dw.delete_table(self.dw_database_name, self.dw_table_name)
+      self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
     else:
       # if append, update table.
-      if self.dw.table_exists(self.project_id, self.dataset_id, self.dw_table_name):
+      if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
         print "Updating table %s with new schema %s." % (self.dw_table_name, schema_file_name)
-        response = self.dw.update_table(self.project_id, self.dataset_id, self.dw_table_name, schema_file_name)
+        response = self.dw.update_table(self.dw_database_name, self.dw_table_name, schema_file_name)
       else:
-        self.dw.create_table(self.project_id, self.dataset_id, self.dw_table_name, schema_file_name, self.process_array)
+        self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
 
     # load data
     fragment_values = self.get_fragments()
@@ -360,16 +352,19 @@ def main():
 
   # parse command line
   parser = argparse.ArgumentParser(description='Generate schema for MongoDB collections.')
-  parser.add_argument('--mongo', metavar='mongo', type=str, help='MongoDB connectivity')
-  parser.add_argument('--source_db', metavar='source_db', type=str, help='Source MongoDB database name')
-  parser.add_argument('--source_collection', metavar='source_collection', type=str, help='Source MongoDB collection name')
+  parser.add_argument('--mongo', metavar='mongo', type=str, required=True, help='MongoDB connectivity')
+  parser.add_argument('--source_db', metavar='source_db', type=str, required=True, help='Source MongoDB database name')
+  parser.add_argument('--source_collection', metavar='source_collection', type=str, required=True, help='Source MongoDB collection name')
   parser.add_argument('--query', metavar='query', type=str, help='[Optional] Query for filtering, etc.')
   parser.add_argument('--tmp_path', metavar='tmp_path', type=str, help='Path to store tmp file from extraction.', default=TMP_PATH)
-  parser.add_argument('--schema_db', metavar='schema_db', type=str, help='MongoDB database name to store schema')
-  parser.add_argument('--schema_collection', metavar='schema_collection', type=str, help='MongoDB collection name to store schema')
+  parser.add_argument('--schema_db', metavar='schema_db', type=str, help='MongoDB database name to store schema. If not provided, default to source db.')
+  parser.add_argument('--schema_collection', metavar='schema_collection', type=str, help='MongoDB collection name to store schema. If not provided, default to [source_collection]_schema')
+  parser.add_argument('--write_disposition', metavar='write_disposition', type=str, help='overwrite or append. Default is overwrite', default='overwrite')
+  parser.add_argument('--hiveserver_host', metavar='hiveserver_host', type=str, required=True, help='Hiveserver host')
+  parser.add_argument('--hiveserver_port', metavar='hiveserver_port', type=str, required=True, help='Hiveserver port')
+  parser.add_argument('--hive_db_name', metavar='hive_db_name', type=str, help='Hive database name. If not provided, default to \'default\' hive database.')
+  parser.add_argument('--hive_table_name', metavar='hive_table_name', type=str, help='Hive table name. If not provided, default to source collection name.')
   parser.add_argument('--use_mr', action='store_true')
-  parser.add_argument('--hiveserver_host', metavar='hiveserver_host', type=str, help='Hiveserver host')
-  parser.add_argument('--hiveserver_port', metavar='hiveserver_port', type=str, help='Hiveserver port')
   args = parser.parse_args()
 
   # global mongo_uri, db_name, collection_name, extract_query, tmp_path, schema_db_name, schema_collection_name, use_mr
@@ -379,10 +374,30 @@ def main():
   loader.collection_name = args.source_collection
   loader.extract_query = args.query
   loader.tmp_path = args.tmp_path
-  loader.schema_db_name = args.schema_db
-  loader.schema_collection_name = args.schema_collection
+
+  if args.schema_db != None:
+    loader.schema_db_name = args.schema_db
+  else:
+    loader.schema_db_name = args.source_db
+
+  if args.schema_collection != None:
+    loader.schema_collection_name = args.schema_collection
+  else:
+    loader.schema_collection_name = "%s_schema" % args.source_collection
+
   loader.hiveserver_host = args.hiveserver_host
   loader.hiveserver_port = args.hiveserver_port
+
+  loader.write_disposition = args.write_disposition
+
+  if args.hive_table_name != None:
+    loader.dw_table_name = args.hive_table_name
+  else:
+    loader.dw_table_name = args.schema_collection
+
+  if args.hive_db_name != None:
+    loader.dw_database_name = args.hive_db_name
+
   if args.use_mr:
     loader.use_mr = args.use_mr
 

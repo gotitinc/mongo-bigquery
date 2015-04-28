@@ -8,47 +8,51 @@ class DataWarehouse:
   __metaclass__ = abc.ABCMeta
 
   @abc.abstractmethod
-  def create_dataset(self, project_id, dataset_id):
+  def create_dataset(self, database_name):
     return
 
   @abc.abstractmethod
-  def delete_dataset(self, project_id, dataset_id):
+  def delete_dataset(self, database_name):
     return
 
   @abc.abstractmethod
-  def create_table(self, project_id, dataset_id, table_id, schema_file_name, process_array):
+  def create_table(self, database_name, table_name, schema_file_name, process_array):
     return
 
   @abc.abstractmethod
-  def update_table(self, project_id, dataset_id, table_id, schema_file_name):
+  def update_table(self, database_name, table_name, schema_file_name):
     return
 
   @abc.abstractmethod
-  def delete_table(self, project_id, dataset_id, table_id):
+  def delete_table(self, database_name, table_name):
     return
 
   @abc.abstractmethod
-  def get_num_rows(self, project_id, dataset_id, table_id):
+  def get_num_rows(self, database_name, table_name):
     return
 
   @abc.abstractmethod
-  def table_exists(self, project_id, dataset_id, table_id):
+  def table_exists(self, database_name, table_name):
     return
 
   @abc.abstractmethod
-  def get_table_schema(self, project_id, dataset_id, table_id):
+  def get_table_schema(self, database_name, table_name):
     return
 
   @abc.abstractmethod
-  def get_job_state(self, project_id, job_id):
+  def get_job_state(self, job_id):
     return
 
   @abc.abstractmethod
-  def list_tables(self, project_id, dataset_id, table_prefix):
+  def list_tables(self, database_name, table_prefix):
     return
 
   @abc.abstractmethod
-  def query(self, project_id, query):
+  def load_table(self, table_name, file_path):
+    return
+
+  @abc.abstractmethod
+  def query(self, query):
     return
 
 
@@ -84,10 +88,10 @@ class Redshift(DataWarehouse):
 
     return output
 
-  def create_dataset(self, project_id, dataset_id):
+  def create_dataset(self, database_name):
     pass
 
-  def delete_dataset(self, project_id, dataset_id):
+  def delete_dataset(self, database_name):
     pass
 
   def flatten(self, schema, fields, parent=None):
@@ -107,7 +111,7 @@ class Redshift(DataWarehouse):
 
       fields.append(node)
 
-  def create_table(self, project_id, dataset_id, table_id, schema_file_name, process_array):
+  def create_table(self, database_name, table_name, schema_file_name, process_array):
 
     # load schema from file
     schema = json.load(open(schema_file_name))
@@ -136,19 +140,19 @@ class Redshift(DataWarehouse):
 
       if data_type is not None:
         if field['mode'] == 'repeated':
-          table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+          table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
           column_name = "value"
         else:
           if "." in field['name']:
-            table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
             column_name = field['name'].rsplit(".",1)[1]
           else:
-            table_name = table_id
+            table_name = table_name
             column_name = field['name']
 
         if table_name not in table_columns:
           table_columns[table_name] = []
-          if table_name != table_id:
+          if table_name != table_name:
             table_columns[table_name].append("%s %s" % ("parent_hash_code", "varchar"))
             table_columns[table_name].append("%s %s" % ("hash_code", "varchar"))
 
@@ -158,7 +162,7 @@ class Redshift(DataWarehouse):
       sql = "create table %s (%s)" % (table_name, ",".join(columns))
       self.execute_sql(sql)
 
-  def update_table(self, project_id, dataset_id, table_id, schema_file_name):
+  def update_table(self, database_name, table_name, schema_file_name):
 
     # load schema from file
     schema = json.load(open(schema_file_name))
@@ -168,11 +172,11 @@ class Redshift(DataWarehouse):
     self.flatten(schema, fields, None)
 
     # current columns
-    table_names = self.list_tables("", "", table_id)
+    table_names = self.list_tables("", "", table_name)
     current_table_columns = {}
     for table_name in table_names:
       current_columns = {}
-      current_schema = self.get_table_schema(project_id, dataset_id, table_name)
+      current_schema = self.get_table_schema(database_name, table_name)
       for field in current_schema:
         current_columns[field['name']] = field['type']
       current_table_columns[table_name] = current_columns
@@ -203,14 +207,14 @@ class Redshift(DataWarehouse):
       if sql_data_type is not None:
 
         if field['mode'] == 'repeated':
-          table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+          table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
           column_name = "value"
         else:
           if "." in field['name']:
-            table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
             column_name = field['name'].rsplit(".",1)[1]
           else:
-            table_name = table_id
+            table_name = table_name
             column_name = field['name']
 
         # print "column name %s" % column_name
@@ -251,10 +255,10 @@ class Redshift(DataWarehouse):
         else:
           select_items.append(current_column)
 
-      tmp_table_name = table_id + "_update_schema"
+      tmp_table_name = table_name + "_update_schema"
       modify_sqls.append("drop table if exists %s" % (tmp_table_name))
-      modify_sqls.append("alter table %s rename to %s" % (table_id, tmp_table_name))
-      modify_sqls.append("create table %s as select %s from %s" % (table_id, ", ".join(select_items), tmp_table_name))
+      modify_sqls.append("alter table %s rename to %s" % (table_name, tmp_table_name))
+      modify_sqls.append("create table %s as select %s from %s" % (table_name, ", ".join(select_items), tmp_table_name))
 
     for sql in modify_sqls:
       self.execute_sql(sql)
@@ -269,30 +273,30 @@ class Redshift(DataWarehouse):
     return {}
 
 
-  def delete_table(self, project_id, dataset_id, table_id):
-    sql = "drop table if exists %s" % (table_id)
+  def delete_table(self, database_name, table_name):
+    sql = "drop table if exists %s" % (table_name)
     self.execute_sql(sql, False)
 
-    child_table_names = self.list_tables(project_id, dataset_id, table_id)
+    child_table_names = self.list_tables(database_name, table_name)
     for child_table_name in child_table_names:
       sql = "drop table if exists %s" % (child_table_name)
       self.execute_sql(sql, False)
 
-  def get_num_rows(self, project_id, dataset_id, table_id):
-    sql = "select count(*) from %s" % (table_id)
+  def get_num_rows(self, database_name, table_name):
+    sql = "select count(*) from %s" % (table_name)
     r = self.execute_sql(sql, True)
     return r[0][0]
 
-  def table_exists(self, project_id, dataset_id, table_id):
-    sql = "select count(*) from pg_table_def where tablename = '%s' and schemaname = 'public'" % (table_id)
+  def table_exists(self, database_name, table_name):
+    sql = "select count(*) from pg_table_def where tablename = '%s' and schemaname = 'public'" % (table_name)
     r = self.execute_sql(sql, True)
     if r[0][0] > 0:
       return True
     return False
 
-  def get_table_schema(self, project_id, dataset_id, table_id):
+  def get_table_schema(self, database_name, table_name):
 
-    sql = "select \"column\", type from pg_table_def where tablename = '%s' and schemaname = 'public'" % (table_id)
+    sql = "select \"column\", type from pg_table_def where tablename = '%s' and schemaname = 'public'" % (table_name)
     r = self.execute_sql(sql, True)
 
     fields = []
@@ -315,7 +319,7 @@ class Redshift(DataWarehouse):
 
     return fields
 
-  def get_job_state(self, project_id, job_id):
+  def get_job_state(self, job_id):
     sql = "select min(status), min(errors), sum(lines_scanned) from (select min(status) as status , min(errors) as errors, min(lines_scanned) as lines_scanned from stl_load_commits where filename like '%%%s%%' group by filename) as a" % job_id
     r = self.execute_sql(sql, True)
 
@@ -347,7 +351,7 @@ class Redshift(DataWarehouse):
     return (job_state, job_result, job_error_message, job_error_reason, job_output_rows)
 
 
-  def list_tables(self, project_id, dataset_id, table_prefix):
+  def list_tables(self, database_name, table_prefix):
     sql = "select distinct table_name from information_schema.columns where table_schema = 'public' and table_name like '%s%%'" % table_prefix
     r = self.execute_sql(sql, True)
     output = []
@@ -355,7 +359,7 @@ class Redshift(DataWarehouse):
       output.append(row[0])
     return output
 
-  def query(self, project_id, query):
+  def query(self, query):
     result = self.execute_sql(query, True)
     output = {}
     output['rows'] = []
@@ -380,18 +384,18 @@ class Hive(DataWarehouse):
     self.port = port
     self.hive_serdes_path = hive_serdes_path
 
-  def execute_sql (self, sql, fetch_result = False):
+  def execute_sql (self, database_name, sql, fetch_result = False):
     import pyhs2
     conn = pyhs2.connect(host=self.host, port=self.port, authMechanism="NOSASL", database='default')
 
-    # turn on tez
+    # turn on tez and add serde jar
     c = conn.cursor()
     c.execute("set hive.execution.engine=tez")
     c.execute("set hive.cache.expr.evaluation=false")
     c.execute("add jar %s" % self.hive_serdes_path)
+    c.execute("use %s" % database_name)
 
-    # run command
-    c = conn.cursor()
+    # run actual command command
     print "Executing HiveQL: %s" % (sql)
     c.execute(sql)
 
@@ -406,10 +410,10 @@ class Hive(DataWarehouse):
 
     return output
 
-  def create_dataset(self, project_id, dataset_id):
+  def create_dataset(self, database_name):
     pass
 
-  def delete_dataset(self, project_id, dataset_id):
+  def delete_dataset(self, database_name):
     pass
 
   def flatten(self, schema, fields, parent=None):
@@ -429,7 +433,7 @@ class Hive(DataWarehouse):
 
       fields.append(node)
 
-  def create_table(self, project_id, dataset_id, table_id, schema_file_name, process_array = "child_table"):
+  def create_table(self, database_name, table_name, schema_file_name, process_array = "child_table"):
 
     # load schema from file
     schema = json.load(open(schema_file_name))
@@ -461,28 +465,28 @@ class Hive(DataWarehouse):
       if data_type is not None:
         if field['mode'] == 'repeated':
           if process_array == "child_table":
-            table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
             column_name = "value"
           else:
             continue
         else:
           if "." in field['name']:
             if process_array == "child_table":
-              table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+              table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
               column_name = field['name'].rsplit(".",1)[1]
               # print "  Child Table column:" + column_name
             else:
-              table_name = table_id
+              table_name = table_name
               column_name = field['name'].split(".",1)[0]
               data_type = "string"
               # print "  Inline column:" + column_name
           else:
-            table_name = table_id
+            table_name = table_name
             column_name = field['name']
 
         if table_name not in table_columns:
           table_columns[table_name] = Set()
-          if table_name != table_id:
+          if table_name != table_name:
             table_columns[table_name].add("%s %s" % ("parent_hash_code", "string"))
             table_columns[table_name].add("%s %s" % ("hash_code", "string"))
 
@@ -490,9 +494,9 @@ class Hive(DataWarehouse):
 
     for table_name, columns in table_columns.iteritems():
       sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
-      self.execute_sql(sql)
+      self.execute_sql(database_name, sql)
 
-  def update_table(self, project_id, dataset_id, table_id, schema_file_name):
+  def update_table(self, database_name, table_name, schema_file_name):
 
     # load schema from file
     schema = json.load(open(schema_file_name))
@@ -502,11 +506,11 @@ class Hive(DataWarehouse):
     self.flatten(schema, fields, None)
 
     # current columns
-    table_names = self.list_tables("", "", table_id)
+    table_names = self.list_tables("", "", table_name)
     current_table_columns = {}
     for table_name in table_names:
       current_columns = {}
-      current_schema = self.get_table_schema(project_id, dataset_id, table_name)
+      current_schema = self.get_table_schema(database_name, table_name)
       for field in current_schema:
         current_columns[field['name']] = field['type']
       current_table_columns[table_name] = current_columns
@@ -539,14 +543,14 @@ class Hive(DataWarehouse):
       if sql_data_type is not None:
 
         if field['mode'] == 'repeated':
-          table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+          table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
           column_name = "value"
         else:
           if "." in field['name']:
-            table_name = table_id + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
+            table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
             column_name = field['name'].rsplit(".",1)[1]
           else:
-            table_name = table_id
+            table_name = table_name
             column_name = field['name']
 
         # print "column name %s" % column_name
@@ -579,46 +583,46 @@ class Hive(DataWarehouse):
     for table_name, modify_columns in modify_instructions.iteritems():
 
       for modify_column_name, data_type in modify_columns.iteritems():
-        modify_sqls.append("alter table %s change %s %s %s" % (table_id, modify_column_name, modify_column_name, data_type))
+        modify_sqls.append("alter table %s change %s %s %s" % (table_name, modify_column_name, modify_column_name, data_type))
 
     for sql in modify_sqls:
-      self.execute_sql(sql)
+      self.execute_sql(database_name, sql)
 
     for sql in alter_sqls:
-      self.execute_sql(sql)
+      self.execute_sql(database_name, sql)
 
     for table_name, columns in new_table_columns.iteritems():
       sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
-      self.execute_sql(sql)
+      self.execute_sql(database_name, sql)
 
     return {}
 
-  def delete_table(self, project_id, dataset_id, table_id):
-    sql = "drop table if exists %s" % (table_id)
-    self.execute_sql(sql, False)
+  def delete_table(self, database_name, table_name):
+    sql = "drop table if exists %s" % (table_name)
+    self.execute_sql(database_name, sql, False)
 
-    child_table_names = self.list_tables(project_id, dataset_id, table_id)
+    child_table_names = self.list_tables(database_name, table_name)
     for child_table_name in child_table_names:
       sql = "drop table if exists %s" % (child_table_name)
-      self.execute_sql(sql, False)
+      self.execute_sql(database_name, sql, False)
 
-  def get_num_rows(self, project_id, dataset_id, table_id):
-    sql = "select count(*) from %s" % (table_id)
-    r = self.execute_sql(sql, True)
+  def get_num_rows(self, database_name, table_name):
+    sql = "select count(*) from %s" % (table_name)
+    r = self.execute_sql(database_name, sql, True)
     return r[0][0]
 
-  def table_exists(self, project_id, dataset_id, table_id):
-    r = self.execute_sql("show tables", True)
+  def table_exists(self, database_name, table_name):
+    r = self.execute_sql(database_name, "show tables", True)
     for row in r:
-      if row[0] == table_id:
+      if row[0] == table_name:
         return True
 
     return False
 
-  def get_table_schema(self, project_id, dataset_id, table_id):
+  def get_table_schema(self, database_name, table_name):
 
-    sql = "desc %s" % (table_id)
-    r = self.execute_sql(sql, True)
+    sql = "desc %s" % (table_name)
+    r = self.execute_sql(database_name, sql, True)
 
     fields = []
     for row in r:
@@ -640,7 +644,7 @@ class Hive(DataWarehouse):
 
     return fields
 
-  def get_job_state(self, project_id, job_id):
+  def get_job_state(self, job_id):
 
     job_state = None
     job_result = None
@@ -651,17 +655,21 @@ class Hive(DataWarehouse):
     return (job_state, job_result, job_error_message, job_error_reason, job_output_rows)
 
 
-  def list_tables(self, project_id, dataset_id, table_prefix):
+  def list_tables(self, database_name, table_prefix):
     sql = "show tables"
-    r = self.execute_sql(sql, True)
+    r = self.execute_sql(database_name, sql, True)
     output = []
     for row in r:
       if row[0].startswith(table_prefix):
         output.append(row[0])
     return output
 
-  def query(self, project_id, query):
-    result = self.execute_sql(query, True)
+  def load_table(self, database_name, table_name, file_path):
+    sql = "load data inpath '%s*' into table %s" % (file_path, table_name)
+    self.execute_sql(database_name, sql, fetch_result = False)
+
+  def query(self, database_name, query):
+    result = self.execute_sql(database_name, query, True)
     output = {}
     output['rows'] = []
     for r in result:
