@@ -12,7 +12,7 @@ from onefold_util import execute
 from dw_util import Hive
 
 
-NUM_RECORDS_PER_PART = 5
+NUM_RECORDS_PER_PART = 100000
 TMP_PATH = '/tmp/onefold_mongo'
 HDFS_PATH = 'onefold_mongo'
 HADOOP_MAPREDUCE_STREAMING_LIB = "/usr/hdp/current/hadoop-mapreduce-client/hadoop-streaming.jar"
@@ -98,13 +98,16 @@ class Loader:
     index = 0
 
     # turn query string into json
-    if 'ObjectId' in self.extract_query:
-      # kinda hacky.. and dangerous! This is to evaluate an expression
-      # like {"_id": {$gt:ObjectId("55401a60151a4b1a4f000001")}}
-      from bson.objectid import ObjectId
-      extract_query_json = eval(self.extract_query)
+    if self.extract_query is not None:
+      if 'ObjectId' in self.extract_query:
+        # kinda hacky.. and dangerous! This is to evaluate an expression
+        # like {"_id": {$gt:ObjectId("55401a60151a4b1a4f000001")}}
+        from bson.objectid import ObjectId
+        extract_query_json = eval(self.extract_query)
+      else:
+        extract_query_json = json.loads(self.extract_query)
     else:
-      extract_query_json = json.loads(self.extract_query)
+      extract_query_json = None
 
     # query collection, sort by collection_sort_by_field
     for data in collection.find(extract_query_json).sort(self.collection_sort_by_field, 1):
@@ -434,7 +437,7 @@ def main():
   if args.hive_table_name != None:
     loader.dw_table_name = args.hive_table_name
   else:
-    loader.dw_table_name = args.schema_collection
+    loader.dw_table_name = args.source_collection
 
   if args.hive_db_name != None:
     loader.dw_database_name = args.hive_db_name
