@@ -394,7 +394,9 @@ class Hive(DataWarehouse):
     c.execute("set hive.execution.engine=tez")
     c.execute("set hive.cache.expr.evaluation=false")
     c.execute("add jar %s" % self.hive_serdes_path)
-    c.execute("use %s" % database_name)
+
+    if database_name != None:
+      c.execute("use %s" % database_name)
 
     # run actual command command
     print "Executing HiveQL: %s" % (sql)
@@ -497,6 +499,8 @@ class Hive(DataWarehouse):
       sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
       self.execute_sql(database_name, sql)
 
+    return table_columns.keys()
+
   def update_table(self, database_name, table_name, schema_file_name):
 
     # load schema from file
@@ -582,21 +586,23 @@ class Hive(DataWarehouse):
     # generate sqls to modify column data type
     modify_sqls = []
     for child_table_name, modify_columns in modify_instructions.iteritems():
-
       for modify_column_name, data_type in modify_columns.iteritems():
         modify_sqls.append("alter table %s change %s %s %s" % (child_table_name, modify_column_name, modify_column_name, data_type))
 
+    # execute alter table to change data type
     for sql in modify_sqls:
       self.execute_sql(database_name, sql)
 
+    # execute alter table to add columns
     for sql in alter_sqls:
       self.execute_sql(database_name, sql)
 
+    # create new tables
     for child_table_name, columns in new_table_columns.iteritems():
       sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (child_table_name, ",".join(columns))
       self.execute_sql(database_name, sql)
 
-    return {}
+    return table_names + new_table_columns.keys()
 
   def delete_table(self, database_name, table_name):
     sql = "drop table if exists %s" % (table_name)

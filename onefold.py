@@ -28,10 +28,11 @@ MAPREDUCE_PARAMS_STR = ' '.join(["-D %s=%s"%(k,v) for k,v in mapreduce_params.it
 
 class Loader:
 
-  # params
+  # control params
   mongo_uri = None
   db_name = None
   collection_name = None
+  collection_sort_by_field = None
   extract_query = None
   tmp_path = None
   schema_db_name = None
@@ -42,16 +43,19 @@ class Loader:
 
   write_disposition = None
   process_array = "child_table"
-  dw_database_name = ''
+  dw_database_name = None
   dw_table_name = None
-  dw = None
 
   # mongo client and schema collection
   mongo_client = None
   mongo_schema_collection = None
 
-  # variables
+  # runtime variables
   extract_file_names = []
+  sort_by_field_min = None
+  sort_by_field_max = None
+  dw_table_names = []
+  dw = None
 
 
   def initialize(self):
@@ -92,7 +96,23 @@ class Loader:
 
     # iterate through the collection
     index = 0
-    for data in collection.find(self.extract_query):
+
+    # turn query string into json
+    if 'ObjectId' in self.extract_query:
+      # kinda hacky.. and dangerous! This is to evaluate an expression
+      # like {"_id": {$gt:ObjectId("55401a60151a4b1a4f000001")}}
+      from bson.objectid import ObjectId
+      extract_query_json = eval(self.extract_query)
+    else:
+      extract_query_json = json.loads(self.extract_query)
+
+    # query collection, sort by collection_sort_by_field
+    for data in collection.find(extract_query_json).sort(self.collection_sort_by_field, 1):
+
+      # track min and max id for auditing..
+      if self.sort_by_field_min == None:
+        self.sort_by_field_min = data[self.collection_sort_by_field]
+      self.sort_by_field_max = data[self.collection_sort_by_field]
 
       # open a new file if necessary
       if index % NUM_RECORDS_PER_PART == 0:
@@ -111,7 +131,8 @@ class Loader:
       extract_file_codec.write(dumps(data))
       extract_file_codec.write('\n')
 
-    extract_file.close()
+    if extract_file != None:
+      extract_file.close()
 
 
   def simple_schema_gen(self):
@@ -302,21 +323,20 @@ class Loader:
     if self.write_disposition == 'overwrite':
       if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
         self.dw.delete_table(self.dw_database_name, self.dw_table_name)
-      self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
+      self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
     else:
       # if append, update table.
       if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
-        print "Updating table %s with new schema %s." % (self.dw_table_name, schema_file_name)
-        response = self.dw.update_table(self.dw_database_name, self.dw_table_name, schema_file_name)
+        self.dw_table_names = self.dw.update_table(self.dw_database_name, self.dw_table_name, schema_file_name)
       else:
-        self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
+        self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
 
     # load data
     fragment_values = self.get_fragments()
 
     if fragment_values == None or len(fragment_values) == 0:
       table_name = self.dw_table_name
-      bq_job_id = self.load_table_hive(shard_value = None, table_name = table_name, different_table_per_shard=False, data_import_id=None)
+      self.load_table_hive(shard_value = None, table_name = table_name, different_table_per_shard=False, data_import_id=None)
 
     else:
       for fragment_value in fragment_values:
@@ -326,7 +346,7 @@ class Loader:
         else:
           table_name = self.dw_table_name + "_" + fragment_value
 
-        bq_job_id = self.load_table_hive(shard_value = fragment_value, table_name = table_name, different_table_per_shard=False, data_import_id=None)
+        self.load_table_hive(shard_value = fragment_value, table_name = table_name, different_table_per_shard=False, data_import_id=None)
 
 
   def run(self):
@@ -346,6 +366,13 @@ class Loader:
 
     self.load_dw()
 
+    print '-------------------'
+    print '    RUN SUMMARY'
+    print '-------------------'
+    print 'Extracted data with %s from %s to %s' % (self.collection_sort_by_field, self.sort_by_field_min, self.sort_by_field_max)
+    print 'Extracted files are located at: %s' % (' '.join(self.extract_file_names))
+    print 'Hive Tables: %s' % (' '.join(self.dw_table_names))
+    print 'Schema is stored in Mongo %s.%s' % (self.schema_db_name, self.schema_collection_name)
 
 def usage():
   # ./onefold.py --mongo mongodb://173.255.115.8:27017 --source_db test --source_collection uber_events --schema_db test --schema_collection uber_events_schema --hiveserver_host 130.211.146.208 --hiveserver_port 10000
@@ -360,7 +387,9 @@ def main():
   parser.add_argument('--source_db', metavar='source_db', type=str, required=True, help='Source MongoDB database name')
   parser.add_argument('--source_collection', metavar='source_collection', type=str, required=True,
                       help='Source MongoDB collection name')
-  parser.add_argument('--query', metavar='query', type=str, help='[Optional] Query for filtering, etc.')
+  parser.add_argument('--source_sort_by_field', metavar='source_sort_by_field', type=str, default='_id',
+                      help='Source MongoDB collection name')
+  parser.add_argument('--query', metavar='query', type=str, help='Mongo Query for filtering')
   parser.add_argument('--tmp_path', metavar='tmp_path', type=str, help='Path to store tmp file from extraction.',
                       default=TMP_PATH)
   parser.add_argument('--schema_db', metavar='schema_db', type=str,
@@ -383,6 +412,7 @@ def main():
   loader.mongo_uri = args.mongo
   loader.db_name = args.source_db
   loader.collection_name = args.source_collection
+  loader.collection_sort_by_field = args.source_sort_by_field
   loader.extract_query = args.query
   loader.tmp_path = args.tmp_path
 
