@@ -48,9 +48,17 @@ pip install pyhs2
 
 In `onefold.py`, near the top, there are a few configuration that you can customized. Make sure these variables are set correctly before proceeding.
 
-|`TMP_PATH` | Where the script will store extracted data from MongoDB. |
-| `HDFS_PATH` | HDFS Path where it will store files for MapReduce and Hive. |
-|`HADOOP_MAPREDUCE_STREAMING_LIB` | Make sure this points to a valid `hadoop-streaming.jar`. The default value is set for Hortonworks HDP 2.2 |
+`TMP_PATH`
+
+Where the script will store extracted data from MongoDB.
+
+`HDFS_PATH`
+
+HDFS Path where it will store files for MapReduce and Hive.
+
+`HADOOP_MAPREDUCE_STREAMING_LIB`
+
+Make sure this points to a valid `hadoop-streaming.jar`. The default value is set for Hortonworks HDP 2.2.
 
 
 ## Usage
@@ -275,11 +283,11 @@ To query for _id > 55401a60151a4b1a4f000001:
 --query '{"_id": {"$gt":ObjectId("55401a60151a4b1a4f000001")}}'
 ```
 
-## KNOWN ISSUES
+## Known Issues
 * There is no easy way to capture records that were updated in MongoDB. We are working on capturing oplog and replay inserts and updates.
 
 ## FAQ
 
-## SUPPORT
+## Support
 
 Email jorge@onefold.io.
