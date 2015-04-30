@@ -141,7 +141,8 @@ In Mongo, you can see the schema saved in a collection called `users_schema`:
 { "_id" : ObjectId("55426ae72e2ecef82b7417d1"), "type" : "fragments", "fragments" : [ "root" ] }
 ```
 
-Notes:
+Notes
+
 1. By default, extracted data is saved in /tmp/onefold_mongo
 2. If `--use_mr` parameter is not specified, it won't use MapReduce to generate schema and transform data. Instead, it runs the mapper and reducer using command line using `cat [input] | mapper | sort | reducer` metaphor. This is handy if you don't have many records and/or just want to get this running quickly.
 3. The generated HDFS file is in JSON format, so for Hive we need to include JSON Serde which is included in the build.
@@ -291,3 +292,10 @@ To query for _id > 55401a60151a4b1a4f000001:
 ## Support
 
 Email jorge@onefold.io.
+
+Table Test
+
+| First Header  | Second Header |
+| ------------- | ------------- |
+| Content Cell  | Content Cell  |
+| Content Cell  | Content Cell  |
