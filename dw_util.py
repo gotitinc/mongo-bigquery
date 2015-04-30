@@ -175,10 +175,10 @@ class Hive(DataWarehouse):
             table_columns[child_table_name].add("%s %s" % ("parent_hash_code", "string"))
             table_columns[child_table_name].add("%s %s" % ("hash_code", "string"))
 
-        table_columns[child_table_name].add("%s %s" % (column_name, data_type))
+        table_columns[child_table_name].add("`%s` %s" % (column_name, data_type))
 
     for table_name, columns in table_columns.iteritems():
-      sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
+      sql = "create table `%s` (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (table_name, ",".join(columns))
       self.execute_sql(database_name, sql)
 
     return table_columns.keys()
@@ -255,7 +255,7 @@ class Hive(DataWarehouse):
               pass
           else:
             print "  column %s not found in current table schema." % column_name
-            alter_sqls.append ("alter table %s add columns (%s %s)" % (child_table_name, column_name, sql_data_type))
+            alter_sqls.append ("alter table `%s` add columns (`%s` %s)" % (child_table_name, column_name, sql_data_type))
 
         else:
           # new table needed
@@ -263,13 +263,13 @@ class Hive(DataWarehouse):
             new_table_columns[child_table_name] = []
             new_table_columns[child_table_name].append("%s %s" % ("parent_hash_code", "string"))
             new_table_columns[child_table_name].append("%s %s" % ("hash_code", "string"))
-          new_table_columns[child_table_name].append("%s %s" % (column_name, sql_data_type))
+          new_table_columns[child_table_name].append("`%s` %s" % (column_name, sql_data_type))
 
     # generate sqls to modify column data type
     modify_sqls = []
     for child_table_name, modify_columns in modify_instructions.iteritems():
       for modify_column_name, data_type in modify_columns.iteritems():
-        modify_sqls.append("alter table %s change %s %s %s" % (child_table_name, modify_column_name, modify_column_name, data_type))
+        modify_sqls.append("alter table `%s` change `%s` `%s` %s" % (child_table_name, modify_column_name, modify_column_name, data_type))
 
     # execute alter table to change data type
     for sql in modify_sqls:
@@ -281,22 +281,22 @@ class Hive(DataWarehouse):
 
     # create new tables
     for child_table_name, columns in new_table_columns.iteritems():
-      sql = "create table %s (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (child_table_name, ",".join(columns))
+      sql = "create table `%s` (%s) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe' " % (child_table_name, ",".join(columns))
       self.execute_sql(database_name, sql)
 
     return table_names + new_table_columns.keys()
 
   def delete_table(self, database_name, table_name):
-    sql = "drop table if exists %s" % (table_name)
+    sql = "drop table if exists `%s`" % (table_name)
     self.execute_sql(database_name, sql, False)
 
     child_table_names = self.list_tables(database_name, table_name)
     for child_table_name in child_table_names:
-      sql = "drop table if exists %s" % (child_table_name)
+      sql = "drop table if exists `%s`" % (child_table_name)
       self.execute_sql(database_name, sql, False)
 
   def get_num_rows(self, database_name, table_name):
-    sql = "select count(*) from %s" % (table_name)
+    sql = "select count(*) from `%s`" % (table_name)
     r = self.execute_sql(database_name, sql, True)
     return r[0][0]
 
@@ -354,7 +354,7 @@ class Hive(DataWarehouse):
     return output
 
   def load_table(self, database_name, table_name, file_path):
-    sql = "load data inpath '%s*' into table %s" % (file_path, table_name)
+    sql = "load data inpath '%s*' into table `%s`" % (file_path, table_name)
     self.execute_sql(database_name, sql, fetch_result = False)
 
   def query(self, database_name, query):

@@ -56,13 +56,11 @@ In `onefold.py`, near the top, there are a few configuration that you can custom
 ## Usage
 
 ### Simple case
-Say you have a MongoDB collection called "test.uber_events", and you have some records in it:
+Say you have a MongoDB collection called "test.users", and you have some records in it:
 
 ```
-> db.uber_events.find();
-{ "_id" : ObjectId("5541571c151a4b35b4000001"), "time" : 10000, "model" : "Galaxy S5", "device" : "Samsung", "carrier" : "Sprint", "distinct_id" : "14124820200", "utm_campaign" : "Facebook_Offer", "stripe_charge_id" : 1237489, "event" : "set_pickup_location", "stripe_customer_id" : 3748, "city" : "Chicago", "app_version" : "2.4" }
-{ "_id" : ObjectId("5541571c151a4b35b4000002"), "time" : 10001, "model" : "Galaxy S5", "device" : "Samsung", "carrier" : "Sprint", "distinct_id" : "14124820201", "utm_campaign" : "Facebook_Offer", "stripe_charge_id" : 1237490, "event" : "set_pickup_location", "stripe_customer_id" : 3749, "city" : "Chicago", "app_version" : "2.4" }
-{ "_id" : ObjectId("5541571c151a4b35b4000003"), "time" : 10002, "model" : "Galaxy S5", "device" : "Samsung", "carrier" : "Sprint", "distinct_id" : "14124820202", "utm_campaign" : "Facebook_Offer", "stripe_charge_id" : 1237491, "event" : "set_pickup_location", "stripe_customer_id" : 3750, "city" : "Chicago", "app_version" : "2.4" }
+> db.users.find();
+{ "_id" : ObjectId("55426ac7151a4b4d32000001"), "mobile" : { "carrier" : "Sprint", "device" : "Samsung" }, "name" : "John Doe", "age" : 24, "utm_campaign" : "Facebook_Offer", "app_version" : "2.4", "address" : { "city" : "Chicago", "zipcode" : 94012 } }
 ```
 
 To load this into Hive,
@@ -70,7 +68,7 @@ To load this into Hive,
 ```
 ./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
              --source_db test \
-             --source_collection uber_events \
+             --source_collection users \
              --hiveserver_host [hive_server_host] \
              --hiveserver_port [hive_server_port]
 ```
@@ -78,83 +76,192 @@ To load this into Hive,
 Results:
 ```
 -- Initializing Hive Util --
-Creating file /tmp/onefold_mongo/uber_events/data/1
-Executing command: cat /tmp/onefold_mongo/uber_events/data/1 | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py mongodb://173.255.115.8:27017/test/uber_events_schema > /dev/null
-Executing command: cat /tmp/onefold_mongo/uber_events/data/1 | json/transform-data-mapper.py mongodb://173.255.115.8:27017/test/uber_events_schema,/tmp/onefold_mongo/uber_events/data_transform/output > /dev/null
+Creating file /tmp/onefold_mongo/users/data/1
+Executing command: cat /tmp/onefold_mongo/users/data/1 | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py mongodb://xxx:xxx/test/users_schema > /dev/null
+Executing command: cat /tmp/onefold_mongo/users/data/1 | json/transform-data-mapper.py mongodb://xxx:xxx/test/users_schema,/tmp/onefold_mongo/users/data_transform/output > /dev/null
 ...
-Executing command: hadoop fs -mkdir -p onefold_mongo/uber_events/data_transform/output/root
-Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/uber_events/data_transform/output/root/part-00000 onefold_mongo/uber_events/data_transform/output/root/
-...
-Executing HiveQL: create table uber_events (app_version string,stripe_customer_id int,id_oid string,event string,utm_campaign string,carrier string,time int,city string,hash_code string,device string,distinct_id string,model string,stripe_charge_id int) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
-Executing HiveQL: load data inpath 'onefold_mongo/uber_events/data_transform/output/root/*' into table uber_events
-...
+Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/root
+Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/root/part-00000 onefold_mongo/users/data_transform/output/root/
+..
+Executing HiveQL: show tables
+Executing HiveQL: create table users (app_version string,utm_campaign string,id_oid string,age int,mobile_device string,name string,address_city string,hash_code string,mobile_carrier string,address_zipcode int) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
+Executing HiveQL: load data inpath 'onefold_mongo/users/data_transform/output/root/*' into table users
 -------------------
     RUN SUMMARY
 -------------------
-Extracted data with _id from 5541571c151a4b35b4000001 to 5541571c151a4b35b4000003
-Extracted files are located at: /tmp/onefold_mongo/uber_events/data/1
-Hive Tables: uber_events
-Schema is stored in Mongo test.uber_events_schema
+Extracted data with _id from 55426ac7151a4b4d32000001 to 55426ac7151a4b4d32000001
+Extracted files are located at: /tmp/onefold_mongo/users/data/1
+Hive Tables: users
+Schema is stored in Mongo test.users_schema
 ```
 
 In Hive, you can see:
 ```
-hive> add jar [install path]/hive-serdes-1.0-SNAPSHOT.jar;
-hive> desc uber_events;
-OK
+hive> add jar [install_path]/hive-serdes-1.0-SNAPSHOT.jar;
+hive> desc users;
 app_version             string                  from deserializer
-stripe_customer_id      int                     from deserializer
-id_oid                  string                  from deserializer
-event                   string                  from deserializer
 utm_campaign            string                  from deserializer
-carrier                 string                  from deserializer
-time                    int                     from deserializer
-city                    string                  from deserializer
+id_oid                  string                  from deserializer
+age                     int                     from deserializer
+mobile_device           string                  from deserializer
+name                    string                  from deserializer
+address_city            string                  from deserializer
 hash_code               string                  from deserializer
-device                  string                  from deserializer
-distinct_id             string                  from deserializer
-model                   string                  from deserializer
-stripe_charge_id        int                     from deserializer
-Time taken: 0.068 seconds, Fetched: 13 row(s)
-hive> select * from uber_events;                                                                                                                              OK                                                                                                                                                            2.4     3748    5541571c151a4b35b4000001        set_pickup_location     Facebook_Offer  Sprint  10000   Chicago fab3915adb7adbabedf988f502bc075faaf01ab3     Samsung  14124820200     Galaxy S5       1237489                                                                                                               2.4     3749    5541571c151a4b35b4000002        set_pickup_location     Facebook_Offer  Sprint  10001   Chicago 87ffe66b3bf61d630a144e212bae1fed1f85baf7     Samsung  14124820201     Galaxy S5       1237490                                                                                                               2.4     3750    5541571c151a4b35b4000003        set_pickup_location     Facebook_Offer  Sprint  10002   Chicago 5ab6b307cbe1ac767e1afd686a01cff778069353     Samsung  14124820202     Galaxy S5       1237491                                                                                                               Time taken: 2.147 seconds, Fetched: 3 row(s)
+mobile_carrier          string                  from deserializer
+address_zipcode         int                     from deserializer
+Time taken: 0.073 seconds, Fetched: 10 row(s)
+hive> select * from users;
+2.4     Facebook_Offer  55426ac7151a4b4d32000001        24      Samsung John Doe        Chicago 863a4ddd10579c8fc7e12b5bd1e188ce083eec2d        Sprint  94012
+Time taken: 0.07 seconds, Fetched: 1 row(s)
 ```
 
-In Mongo, you can see the schema saved in a collection called `uber_events_schema`:
+In Mongo, you can see the schema saved in a collection called `users_schema`:
 ```
-> db.uber_events_schema.find();
-{ "_id" : ObjectId("55415a87296e82247fdb6592"), "type" : "field", "data_type" : "string-nullable", "key" : "app_version" }
-{ "_id" : ObjectId("55415a87296e82247fdb6593"), "type" : "field", "data_type" : "string-nullable", "key" : "carrier" }
-{ "_id" : ObjectId("55415a87296e82247fdb6594"), "type" : "field", "data_type" : "string-nullable", "key" : "city" }
-{ "_id" : ObjectId("55415a87296e82247fdb6595"), "type" : "field", "data_type" : "string-nullable", "key" : "device" }
-{ "_id" : ObjectId("55415a87296e82247fdb6596"), "type" : "field", "data_type" : "string-nullable", "key" : "distinct_id" }
-{ "_id" : ObjectId("55415a87296e82247fdb6597"), "type" : "field", "data_type" : "string-nullable", "key" : "event" }
-{ "_id" : ObjectId("55415a87296e82247fdb6598"), "type" : "field", "data_type" : "string-nullable", "key" : "id_oid" }
-{ "_id" : ObjectId("55415a87296e82247fdb6599"), "type" : "field", "data_type" : "record-nullable", "key" : "id" }
-{ "_id" : ObjectId("55415a87296e82247fdb659a"), "type" : "field", "data_type" : "string-nullable", "key" : "model" }
-{ "_id" : ObjectId("55415a87296e82247fdb659b"), "type" : "field", "data_type" : "integer-nullable", "key" : "stripe_charge_id" }
-{ "_id" : ObjectId("55415a87296e82247fdb659c"), "type" : "field", "data_type" : "integer-nullable", "key" : "stripe_customer_id" }
-{ "_id" : ObjectId("55415a87296e82247fdb659d"), "type" : "field", "data_type" : "integer-nullable", "key" : "time" }
-{ "_id" : ObjectId("55415a87296e82247fdb659e"), "type" : "field", "data_type" : "string-nullable", "key" : "utm_campaign" }
-{ "_id" : ObjectId("55415a872e2ecef82b7417cf"), "type" : "fragments", "fragments" : [ "root" ] }
+> db.users_schema.find();
+{ "_id" : ObjectId("55426ae6296e827fc79300b1"), "type" : "field", "data_type" : "string-nullable", "key" : "address_city" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b2"), "type" : "field", "data_type" : "record-nullable", "key" : "address" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b3"), "type" : "field", "data_type" : "integer-nullable", "key" : "address_zipcode" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b4"), "type" : "field", "data_type" : "integer-nullable", "key" : "age" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b5"), "type" : "field", "data_type" : "string-nullable", "key" : "app_version" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b6"), "type" : "field", "data_type" : "string-nullable", "key" : "id_oid" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b7"), "type" : "field", "data_type" : "record-nullable", "key" : "id" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b8"), "type" : "field", "data_type" : "string-nullable", "key" : "mobile_carrier" }
+{ "_id" : ObjectId("55426ae6296e827fc79300b9"), "type" : "field", "data_type" : "string-nullable", "key" : "mobile_device" }
+{ "_id" : ObjectId("55426ae6296e827fc79300ba"), "type" : "field", "data_type" : "record-nullable", "key" : "mobile" }
+{ "_id" : ObjectId("55426ae6296e827fc79300bb"), "type" : "field", "data_type" : "string-nullable", "key" : "name" }
+{ "_id" : ObjectId("55426ae6296e827fc79300bc"), "type" : "field", "data_type" : "string-nullable", "key" : "utm_campaign" }
+{ "_id" : ObjectId("55426ae72e2ecef82b7417d1"), "type" : "fragments", "fragments" : [ "root" ] }
 ```
 
 Notes:
 1. By default, extracted data is saved in /tmp/onefold_mongo
-2. If `--use_mr` parameter is not specified, it won't use MapReduce to generate schema and transform data. This is handy if you don't have many records and/or just want to get this working quickly. In lieu of MapReduce, it will just run the mapper and reducer using command line using `cat [input] | mapper | sort | reducer` metaphor.
+2. If `--use_mr` parameter is not specified, it won't use MapReduce to generate schema and transform data. Instead, it runs the mapper and reducer using command line using `cat [input] | mapper | sort | reducer` metaphor. This is handy if you don't have many records and/or just want to get this running quickly.
 3. The generated HDFS file is in JSON format, so for Hive we need to include JSON Serde which is included in the build.
+4. Nested objects like `mobile` and `address` are flattened out in Hive table.
+5. `hash_code` column is added. It's basically an SHA1 hash of the object. It's useful later on when we use `hash_code` as parent-child key to represent array in a child table.
+
 
 ## Now let's add a record with new fields
 
-In Mongo, one new record is added with
+In Mongo, one new records is added with some new fields:
+```
+> db.users.find();
+...
+{ "_id" : ObjectId("55426c42151a4b4d9e000001"), "hobbies" : [ "reading", "cycling" ], "age" : 34, "work_history" : [ { "to" : "present", "from" : 2013, "name" : "IBM" }, { "to" : 2013, "from" : 2003, "name" : "Bell" } ], "utm_campaign" : "Google", "name" : "Alexander Keith", "app_version" : "2.5", "mobile" : { "device" : "iPhone", "carrier" : "Rogers" }, "address" : { "state" : "Ontario", "zipcode" : "M1K3A5", "street" : "26 Marshall Lane", "city" : "Toronto" } }
+```
+New fields added to `address` nested object.
+`address.zipcode` is now string (used to be integer).
+A new `hobbies` field is added that is a string array.
+A new `work_history` field is added that is an array of nested objects.
 
+Run the command with parameters `--write_disposition append` and `--query '{"_id":{"$gt":ObjectId("55426ac7151a4b4d32000001")}}':
+```
+./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
+             --source_db test \
+             --source_collection users \
+             --hiveserver_host [hive_server_host] \
+             --hiveserver_port [hive_server_port]
+             --write_disposition append \
+             --query '{"_id":{"$gt":ObjectId("55426f15151a4b4e46000001")}}'
+```
 
+Results:
+```
+-- Initializing Hive Util --
+...
+Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/root
+Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/root/part-00000 onefold_mongo/users/data_transform/output/root/
+Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/work_history
+Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/work_history/part-00000 onefold_mongo/users/data_transform/output/work_history/
+Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/hobbies
+Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/hobbies/part-00000 onefold_mongo/users/data_transform/output/hobbies/
+...
+Executing HiveQL: alter table `users` change `address_zipcode` `address_zipcode` string
+Executing HiveQL: alter table `users` add columns (`address_state` string)
+Executing HiveQL: alter table `users` add columns (`address_street` string)
+Executing HiveQL: create table `users_hobbies` (parent_hash_code string,hash_code string,`value` string) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
+Executing HiveQL: create table `users_work_history` (parent_hash_code string,hash_code string,`from` int,`name` string,`to` string) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
+...
+-------------------
+    RUN SUMMARY
+-------------------
+Extracted data with _id from 55426f52151a4b4e5a000001 to 55426f52151a4b4e5a000001
+Extracted files are located at: /tmp/onefold_mongo/users/data/1
+Hive Tables: users users_hobbies users_work_history
+Schema is stored in Mongo test.users_schema
+```
 
+In Hive, two new tables are created: `users_hobbies` and `users_work_history`
+```
+hive> show tables;
+users
+users_hobbies
+users_work_history
+
+hive> desc users_hobbies;
+OK
+parent_hash_code        string                  from deserializer
+hash_code               string                  from deserializer
+value                   string                  from deserializer
+Time taken: 0.068 seconds, Fetched: 3 row(s)
+
+hive> desc users_work_history;
+OK
+parent_hash_code        string                  from deserializer
+hash_code               string                  from deserializer
+from                    int                     from deserializer
+name                    string                  from deserializer
+to                      string                  from deserializer
+Time taken: 0.067 seconds, Fetched: 5 row(s)
+```
+
+You can join parent and child table like:
+```
+hive> select * from users join users_hobbies on users.hash_code = users_hobbies.parent_hash_code
+                          join users_work_history on users.hash_code = users_work_history.parent_hash_code;
+```
 
 
 ## Parameters
 
+`--mongo`
+MongoDB connectivity URI, e.g. mongodb://127.0.0.1:27017
 
+`--source_db`
+The MongoDB database name from which to extract data.
 
+`--source_collection`
+The MongoDB collection name from which to extract data.
+
+`--hiveserver_host`
+Hive server host.
+
+`--hiveserver_port`
+Hive server port.
+
+`--query`
+Optional query users can specify when doing extraction. Useful for filtering out only incremental records. See below for some examples.
+
+`--tmp_path`
+Optional. Path used to store extracted data. Default is /tmp/onefold_mongo
+
+`--schema_db`
+Optional. The MongoDB database name to which schema data is written. Default to the same database as source.
+
+`--schema_collection`
+Optional. The MongoDB collection to which schema data is written. Default to [source_collection]_schema.
+
+`--write_disposition`
+Optional. Valid values are `overwrite` and `append`. Tells the program whether to overwrite the Hive table or to append to existing table.
+
+`--hive_db_name`
+Optional. The Hive database to use.
+
+`--hive_table_name`
+Optional. The Hive table name to use.
+
+`--use_mr`
+If this parameter is specified, the program will use MapReduce to generate schema and transform data. If not, the mapper and reducer will be executed as command line using the `cat [input] | mapper | sort | reducer` metaphore. This is useful for small data set and if you just want to get things up and running quickly.
 
 ## Query Examples
 
@@ -168,3 +275,11 @@ To query for _id > 55401a60151a4b1a4f000001:
 --query '{"_id": {"$gt":ObjectId("55401a60151a4b1a4f000001")}}'
 ```
 
+## KNOWN ISSUES
+* There is no easy way to capture records that were updated in MongoDB. We are working on capturing oplog and replay inserts and updates.
+
+## FAQ
+
+## SUPPORT
+
+Email jorge@onefold.io.
