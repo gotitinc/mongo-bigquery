@@ -28,7 +28,8 @@ NUM_RECORDS_PER_PART = 100000
 TMP_PATH = '/tmp/onefold_mongo'
 HDFS_PATH = 'onefold_mongo'
 HADOOP_MAPREDUCE_STREAMING_LIB = "/usr/hdp/current/hadoop-mapreduce-client/hadoop-streaming.jar"
-HIVE_SERDES_LIB = os.getcwd() + "/hive-serdes-1.0-SNAPSHOT.jar"
+ONEFOLD_MAPREDUCE_JAR = os.getcwd() + "/java/MapReduce/target/MapReduce-0.0.1-SNAPSHOT.jar"
+ONEFOLD_HIVESERDES_JAR = os.getcwd() + "/java/HiveSerdes/target/hive-serdes-1.0-SNAPSHOT.jar"
 
 # default mapreduce params
 mapreduce_params = {}
@@ -92,7 +93,7 @@ class Loader:
       self.mongo_schema_collection.remove({})
 
     # create data warehouse object
-    self.dw = Hive(self.hiveserveer_host, self.hiveserver_port, HIVE_SERDES_LIB)
+    self.dw = Hive(self.hiveserveer_host, self.hiveserver_port, ONEFOLD_HIVESERDES_JAR)
 
     # turn policies into better data structure for use later (required_fields)
     if self.policies != None:
@@ -269,8 +270,8 @@ class Loader:
     execute("hadoop fs -rm -r -f %s" % hdfs_mr_output_folder)
 
 
-    hadoop_command = """hadoop jar /usr/hdp/2.2.0.0-2041/hadoop-mapreduce/hadoop-streaming.jar \
-                              -libjars java/MapReduce/target/MapReduce-0.0.1-SNAPSHOT.jar \
+    hadoop_command = """hadoop jar %s \
+                              -libjars %s \
                               -D mapred.job.name="onefold-mongo-transform-data" \
                               -D mapred.reduce.tasks=0 \
                               %s \
@@ -278,7 +279,7 @@ class Loader:
                               -mapper 'json/transform-data-mapper.py %s/%s/%s' \
                               -file json/transform-data-mapper.py \
                               -outputformat com.onefold.hadoop.MapReduce.TransformDataMultiOutputFormat
-    """ % (MAPREDUCE_PARAMS_STR, hdfs_data_folder, hdfs_mr_output_folder, self.mongo_uri,
+    """ % (HADOOP_MAPREDUCE_STREAMING_LIB, ONEFOLD_MAPREDUCE_JAR, MAPREDUCE_PARAMS_STR, hdfs_data_folder, hdfs_mr_output_folder, self.mongo_uri,
            self.schema_db_name, self.schema_collection_name)
     execute(hadoop_command)
 
