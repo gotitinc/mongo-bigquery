@@ -38,7 +38,12 @@ pip install pymongo
 cd java/MapReduce
 mvn package
 ```
-3. Install Python pyhs2 package to connect to Hive Server:
+3. Run this to compile JSON Serde:
+```
+cd java/HiveSerdes
+mvn package
+```
+4. Install Python pyhs2 package to connect to Hive Server:
 ```
 yum install gcc-c++
 yum install cyrus-sasl-devel.x86_64
@@ -105,7 +110,8 @@ Schema is stored in Mongo test.users_schema
 
 In Hive, you can see:
 ```
-hive> add jar [install_path]/hive-serdes-1.0-SNAPSHOT.jar;
+hive> add jar [install_path]/java/HiveSerdes/target/hive-serdes-1.0-SNAPSHOT.jar;
+
 hive> desc users;
 app_version             string                  from deserializer
 utm_campaign            string                  from deserializer
@@ -118,6 +124,7 @@ hash_code               string                  from deserializer
 mobile_carrier          string                  from deserializer
 address_zipcode         int                     from deserializer
 Time taken: 0.073 seconds, Fetched: 10 row(s)
+
 hive> select * from users;
 2.4     Facebook_Offer  55426ac7151a4b4d32000001        24      Samsung John Doe        Chicago 863a4ddd10579c8fc7e12b5bd1e188ce083eec2d        Sprint  94012
 Time taken: 0.07 seconds, Fetched: 1 row(s)
@@ -169,7 +176,7 @@ Run the command with parameters `--write_disposition append` and `--query '{"_id
              --source_db test \
              --source_collection users \
              --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port]
+             --hiveserver_port [hive_server_port] \
              --write_disposition append \
              --query '{"_id":{"$gt":ObjectId("55426f15151a4b4e46000001")}}'
 ```
@@ -230,6 +237,42 @@ hive> select * from users join users_hobbies on users.hash_code = users_hobbies.
                           join users_work_history on users.hash_code = users_work_history.parent_hash_code;
 ```
 
+### More Examples
+
+You can provide your own schema collection name.
+
+```
+./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
+             --source_db test \
+             --source_collection users \
+             --schema_db test \
+             --schema_collection users_schema \
+             --hiveserver_host [hive_server_host] \
+             --hiveserver_port [hive_server_port]
+```
+
+You can specify the name of Hive table generated.
+
+```
+./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
+             --source_db test \
+             --source_collection users \
+             --hive_db_name our_mongo_db \
+             --hive_table_name our_mongo_users \
+             --hiveserver_host [hive_server_host] \
+             --hiveserver_port [hive_server_port]
+```
+
+By default, the program doesn't use MapReduce. If you want to use MapReduce, use the `--use_mr` flag.
+
+```
+./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
+             --source_db test \
+             --source_collection users \
+             --use_mr \
+             --hiveserver_host [hive_server_host] \
+             --hiveserver_port [hive_server_port]
+```
 
 ## Parameters
 
@@ -313,7 +356,10 @@ To query for _id > 55401a60151a4b1a4f000001:
 ```
 
 ## Known Issues
+
 * There is no easy way to capture records that were updated in MongoDB. We are working on capturing oplog and replay inserts and updates.
+* The ways in which the data type of a given changes over time is huge. A field can change from an int, to a string, to an array of string, to an array of mix types, to an array of complex objects over time. We haven't tested all the different combinations, but very interested in support as many as we can. Let us know if you have found a case that we don't support well.
+* We don't use Hive's built-in complex data types like struct and arrays. That is coming in the next release. Let us know if that's something you are very interested in.
 
 ## FAQ
 
