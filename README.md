@@ -150,7 +150,7 @@ Notes
 5. `hash_code` column is added. It's basically an SHA1 hash of the object. It's useful later on when we use `hash_code` as parent-child key to represent array in a child table.
 
 
-## Now let's add a record with new fields
+### Now let's add a record with new fields
 
 In Mongo, one new records is added with some new fields:
 ```
@@ -163,7 +163,7 @@ New fields added to `address` nested object.
 A new `hobbies` field is added that is a string array.
 A new `work_history` field is added that is an array of nested objects.
 
-Run the command with parameters `--write_disposition append` and `--query '{"_id":{"$gt":ObjectId("55426ac7151a4b4d32000001")}}':
+Run the command with parameters `--write_disposition append` and `--query '{"_id":{"$gt":ObjectId("55426ac7151a4b4d32000001")}}'`:
 ```
 ./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
              --source_db test \
@@ -293,9 +293,3 @@ To query for _id > 55401a60151a4b1a4f000001:
 
 Email jorge@onefold.io.
 
-Table Test
-
-| First Header  | Second Header |
-| ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |

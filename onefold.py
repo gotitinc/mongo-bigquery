@@ -46,16 +46,24 @@ class Loader:
   dw_database_name = None
   dw_table_name = None
 
+  policies = None
+
   # mongo client and schema collection
   mongo_client = None
   mongo_schema_collection = None
 
   # runtime variables
   extract_file_names = []
+  reject_file_names = []
   sort_by_field_min = None
   sort_by_field_max = None
   dw_table_names = []
   dw = None
+  num_records_extracted = 0
+  num_records_rejected = 0
+
+  # policy related variables
+  required_fields = {}
 
 
   def initialize(self):
@@ -74,6 +82,14 @@ class Loader:
     # create data warehouse object
     self.dw = Hive(self.hiveserveer_host, self.hiveserver_port, HIVE_SERDES_LIB)
 
+    # turn policies into better data structure for use later (required_fields)
+    if self.policies != None:
+      for policy in self.policies:
+        if 'field_name' in policy and 'required' in policy:
+          if policy['field_name'] not in self.required_fields == None:
+            self.required_fields[policy['field_name']] = {}
+          self.required_fields[policy['field_name']] = policy
+
 
   def extract_data(self):
 
@@ -81,8 +97,15 @@ class Loader:
     if not os.path.exists(os.path.join(self.tmp_path, self.collection_name, 'data')):
       os.makedirs(os.path.join(self.tmp_path, self.collection_name, 'data'))
 
+    if not os.path.exists(os.path.join(self.tmp_path, self.collection_name, 'rejected')):
+      os.makedirs(os.path.join(self.tmp_path, self.collection_name, 'rejected'))
+
     # delete old tmp files if exists
     for old_file in glob.glob(os.path.join(self.tmp_path, self.collection_name, 'data', '*')):
+      print "Deleting old file %s" % (old_file)
+      os.remove(old_file)
+
+    for old_file in glob.glob(os.path.join(self.tmp_path, self.collection_name, 'rejected', '*')):
       print "Deleting old file %s" % (old_file)
       os.remove(old_file)
 
@@ -90,12 +113,12 @@ class Loader:
     part_num = 0
     extract_file = None
 
+    reject_part_num = 0
+    reject_file = None
+
     # start mongo client
     db = self.mongo_client[self.db_name]
     collection = db[self.collection_name]
-
-    # iterate through the collection
-    index = 0
 
     # turn query string into json
     if self.extract_query is not None:
@@ -118,7 +141,7 @@ class Loader:
       self.sort_by_field_max = data[self.collection_sort_by_field]
 
       # open a new file if necessary
-      if index % NUM_RECORDS_PER_PART == 0:
+      if self.num_records_extracted % NUM_RECORDS_PER_PART == 0:
 
         if extract_file != None:
           extract_file.close()
@@ -130,13 +153,45 @@ class Loader:
         self.extract_file_names.append(extract_file_name)
         print "Creating file %s" % extract_file_name
 
-      index += 1
-      extract_file_codec.write(dumps(data))
-      extract_file_codec.write('\n')
+      # validate policies
+      rejected = False
+      for required_field_name, policy in self.required_fields.iteritems():
+        if policy['required'] and required_field_name not in data:
+
+          # --------------------------------------------------------
+          # document found that doesn't contain required fields.
+          # --------------------------------------------------------
+
+          # open a new file if necessary
+          if self.num_records_rejected % NUM_RECORDS_PER_PART == 0:
+
+            if reject_file != None:
+              reject_file.close()
+
+            reject_part_num += 1
+            reject_file_name = os.path.join(self.tmp_path, self.collection_name, 'rejected', str(reject_part_num))
+            reject_file = open(reject_file_name, "w")
+            reject_file_codec = codecs.getwriter("utf-8")(reject_file)
+            self.reject_file_names.append(reject_file_name)
+            print "Creating reject file %s" % reject_file_name
+
+          self.num_records_rejected += 1
+          reject_file_codec.write("Rejected. Missing %s. Data: %s" % (required_field_name, dumps(data)))
+          reject_file_codec.write('\n')
+
+          rejected = True
+          break
+
+      if not rejected:
+        self.num_records_extracted += 1
+        extract_file_codec.write(dumps(data))
+        extract_file_codec.write('\n')
 
     if extract_file != None:
       extract_file.close()
 
+    if reject_file != None:
+      reject_file.close()
 
   def simple_schema_gen(self):
     command = "cat %s | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py %s/%s/%s > /dev/null" \
@@ -372,6 +427,8 @@ class Loader:
     print '-------------------'
     print '    RUN SUMMARY'
     print '-------------------'
+    print 'Num records extracted %s' % self.num_records_extracted
+    print 'Num records rejected %s' % self.num_records_rejected
     print 'Extracted data with %s from %s to %s' % (self.collection_sort_by_field, self.sort_by_field_min, self.sort_by_field_max)
     print 'Extracted files are located at: %s' % (' '.join(self.extract_file_names))
     print 'Hive Tables: %s' % (' '.join(self.dw_table_names))
@@ -408,6 +465,8 @@ def main():
   parser.add_argument('--hive_table_name', metavar='hive_table_name', type=str,
                       help='Hive table name. If not provided, default to source collection name.')
   parser.add_argument('--use_mr', action='store_true')
+  parser.add_argument('--policy_file', metavar='policy_file', type=str,
+                      help='Data Policy file name.')
   args = parser.parse_args()
 
   # global mongo_uri, db_name, collection_name, extract_query, tmp_path, schema_db_name, schema_collection_name, use_mr
@@ -444,6 +503,11 @@ def main():
 
   if args.use_mr:
     loader.use_mr = args.use_mr
+
+  if args.policy_file != None:
+    # open policy file
+    policy_file = open(args.policy_file, "r")
+    loader.policies = json.loads(policy_file.read())
 
   loader.run()
 
