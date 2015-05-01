@@ -1,5 +1,20 @@
 #!/usr/bin/env python
 
+#
+# Copyright 2015, OneFold
+# All rights reserved.
+# http://www.onefold.io
+#
+# Author: Jorge Chang
+#
+# See license in LICENSE file.
+#
+# Generate Schema Reducer - reduces multiple / conflicting data type of a particular
+# field into the most general one, e.g.
+# input: "zip_code" => (int, string)
+# output: "zip_code" => (string) because string > int.
+#
+
 import sys
 import codecs
 from pymongo import MongoClient

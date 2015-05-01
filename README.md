@@ -141,12 +141,12 @@ In Mongo, you can see the schema saved in a collection called `users_schema`:
 { "_id" : ObjectId("55426ae72e2ecef82b7417d1"), "type" : "fragments", "fragments" : [ "root" ] }
 ```
 
-Notes
+Notes:
 
-1. By default, extracted data is saved in /tmp/onefold_mongo
-2. If `--use_mr` parameter is not specified, it won't use MapReduce to generate schema and transform data. Instead, it runs the mapper and reducer using command line using `cat [input] | mapper | sort | reducer` metaphor. This is handy if you don't have many records and/or just want to get this running quickly.
-3. The generated HDFS file is in JSON format, so for Hive we need to include JSON Serde which is included in the build.
-4. Nested objects like `mobile` and `address` are flattened out in Hive table.
+1. By default, extracted data is saved in `/tmp/onefold_mongo`. It can be changed by specifying the `tmp_path` parameter.
+2. If `--use_mr` parameter is specified, it will use MapReduce to generate schema and transform data. Otherwise, it runs the mapper and reducer via command line using `cat [input] | mapper | sort | reducer` metaphor. This is handy if you don't have many records and/or just want to get this going quickly.
+3. The generated HDFS files are in JSON format, so in Hive, you need to add the included JSON Serde. In Hive, run this command before select from the generated tables: `add jar [install_path]/hive-serdes-1.0-SNAPSHOT.jar`
+4. Nested objects like `mobile` and `address` in the above example are flattened out in the Hive table.
 5. `hash_code` column is added. It's basically an SHA1 hash of the object. It's useful later on when we use `hash_code` as parent-child key to represent array in a child table.
 
 
@@ -252,25 +252,53 @@ Hive server port.
 Optional query users can specify when doing extraction. Useful for filtering out only incremental records. See below for some examples.
 
 `--tmp_path`
-Optional. Path used to store extracted data. Default is /tmp/onefold_mongo
+Optional. Path used to store extracted data. Default is `/tmp/onefold_mongo`
 
 `--schema_db`
 Optional. The MongoDB database name to which schema data is written. Default to the same database as source.
 
 `--schema_collection`
-Optional. The MongoDB collection to which schema data is written. Default to [source_collection]_schema.
+Optional. The MongoDB collection to which schema data is written. Default to `[source_collection]_schema`.
 
 `--write_disposition`
 Optional. Valid values are `overwrite` and `append`. Tells the program whether to overwrite the Hive table or to append to existing table.
 
 `--hive_db_name`
-Optional. The Hive database to use.
+Optional. The Hive database to use. If not specified, it will use `default` database.
 
 `--hive_table_name`
-Optional. The Hive table name to use.
+Optional. The Hive table name to use. If not specified, it will use source collection name.
 
 `--use_mr`
 If this parameter is specified, the program will use MapReduce to generate schema and transform data. If not, the mapper and reducer will be executed as command line using the `cat [input] | mapper | sort | reducer` metaphore. This is useful for small data set and if you just want to get things up and running quickly.
+
+`--policy_file`
+Use the specified file for policies which you can use to configure required fields, etc. See below for supported policies
+
+## Policy Manager
+
+Policy manager is used to control schema generation. With the policy manager, you can:
+
+1. Specify required fields.
+2. Overwrite data type for certain fields.
+
+Example policy file:
+
+```
+[
+    {
+        "field_name": "last_name",
+        "required": true
+    },
+    {
+        "field_name": "age",
+        "data_type_overwrite": "int"
+    }
+]
+```
+
+Save the policy file, and pass the policy file in as command line argument via `--policy_file`.
+
 
 ## Query Examples
 

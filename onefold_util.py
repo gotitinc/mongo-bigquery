@@ -1,3 +1,17 @@
+#!/usr/bin/env python
+
+#
+# Copyright 2015, OneFold
+# All rights reserved.
+# http://www.onefold.io
+#
+# Author: Jorge Chang
+#
+# See license in LICENSE file.
+#
+# OneFold utility functions - mainly for executing shell commands.
+#
+
 import subprocess
 import os
 import random

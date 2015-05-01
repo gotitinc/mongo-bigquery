@@ -1,3 +1,18 @@
+#!/usr/bin/env python
+
+#
+# Copyright 2015, OneFold
+# All rights reserved.
+# http://www.onefold.io
+#
+# Author: Jorge Chang
+#
+# See license in LICENSE file.
+#
+# Data warehouse utility - interface to DataWarehouse + implementation for Hive.
+# basic functionaliy like create table, update table, list tables, execute queries / DMLs, etc.
+#
+
 import json
 import abc
 import re

@@ -1,5 +1,18 @@
 #!/usr/bin/env python
 
+#
+# Copyright 2015, OneFold
+# All rights reserved.
+# http://www.onefold.io
+#
+# Author: Jorge Chang
+#
+# See license in LICENSE file.
+#
+# Transform Data Mapper - takes data from stdin, cleans the data based on schema
+# generated previously, and split array fields into different files.
+#
+
 import re
 import sys
 import json

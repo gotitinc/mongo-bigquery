@@ -1,5 +1,18 @@
 #!/usr/bin/env python
 
+#
+# Copyright 2015, OneFold
+# All rights reserved.
+# http://www.onefold.io
+#
+# Author: Jorge Chang
+#
+# See license in LICENSE file.
+#
+# Generate Schema Mapper - takes data from stdin, performs deep inspection and emits
+# field-name -> data-type tuples.
+#
+
 import re
 import sys
 import json
