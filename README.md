@@ -34,22 +34,26 @@ pip install pymongo
 
 1. git clone this repo on the master node in your Hadoop cluster.
 2. Run this to compile custom code needed for MapReduce:
-```
-cd java/MapReduce
-mvn package
-```
+
+  ```
+  cd java/MapReduce
+  mvn package
+  ```
 3. Run this to compile JSON Serde:
-```
-cd java/HiveSerdes
-mvn package
-```
+ 
+  ```
+  cd java/HiveSerdes
+  mvn package
+  ```
+
 4. Install Python pyhs2 package to connect to Hive Server:
-```
-yum install gcc-c++
-yum install cyrus-sasl-devel.x86_64
-yum install python-devel.x86_64
-pip install pyhs2
-```
+ 
+  ```
+  yum install gcc-c++
+  yum install cyrus-sasl-devel.x86_64
+  yum install python-devel.x86_64
+  pip install pyhs2
+  ```
 
 In `onefold.py`, near the top, there are a few configuration that you can customized. Make sure these variables are set correctly before proceeding.
 
