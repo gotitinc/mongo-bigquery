@@ -98,10 +98,17 @@ class Loader:
     # turn policies into better data structure for use later (required_fields)
     if self.policies != None:
       for policy in self.policies:
-        if 'field_name' in policy and 'required' in policy:
-          if policy['field_name'] not in self.required_fields == None:
-            self.required_fields[policy['field_name']] = {}
-          self.required_fields[policy['field_name']] = policy
+        if 'field_name' in policy:
+          if 'required' in policy:
+            if policy['field_name'] not in self.required_fields == None:
+              self.required_fields[policy['field_name']] = {}
+            self.required_fields[policy['field_name']] = policy
+
+          if 'data_type_overwrite' in policy:
+            self.mongo_schema_collection.update_one(
+              {"key": policy['field_name'], "type": "field"},
+              {"$set": {"data_type": policy['data_type_overwrite'] + "-forced"}},
+              upsert = True)
 
 
   def extract_data(self):
