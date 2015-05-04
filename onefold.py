@@ -39,6 +39,14 @@ mapreduce_params["mapred.task.timeout"] = "12000000"
 MAPREDUCE_PARAMS_STR = ' '.join(["-D %s=%s"%(k,v) for k,v in mapreduce_params.iteritems()])
 
 
+def parse_datatype_mode (datatype_mode):
+  a = datatype_mode.split("-")
+  if len(a) >= 2:
+    return (a[0], a[1])
+  else:
+    raise ValueError('Invalid datatype / mode tuple %s' % datatype_mode)
+
+
 class Loader:
 
   # control params
@@ -105,9 +113,14 @@ class Loader:
             self.required_fields[policy['field_name']] = policy
 
           if 'data_type_overwrite' in policy:
+            datatype_mode_overwrite = policy['data_type_overwrite']
+            (forced_datatype, forced_mode) = parse_datatype_mode(datatype_mode_overwrite)
+
             self.mongo_schema_collection.update_one(
               {"key": policy['field_name'], "type": "field"},
-              {"$set": {"data_type": policy['data_type_overwrite'] + "-forced"}},
+              {"$set": {"data_type": forced_datatype,
+                        "mode": forced_mode,
+                        "forced": True}},
               upsert = True)
 
 
@@ -291,73 +304,24 @@ class Loader:
     execute(hadoop_command)
 
 
-  # create table
-  def generate_table_schema(self):
+  # retrieve schema tree from schema collection
+  def retrieve_schema_fields(self):
 
     # read schema from mongodb schema collection
-    schema = []
+    schema_fields = []
 
     mongo_schema_fields = self.mongo_schema_collection.find({"type": "field"})
-    schema_fields = {}
     for mongo_schema_field in mongo_schema_fields:
-      schema_fields[mongo_schema_field['key']] = mongo_schema_field['data_type']
+      schema_fields.append(mongo_schema_field)
 
-    # sort schema fields
-    sorted_schema_fields = sorted(schema_fields.iteritems())
-
-    for name, data_type_mode in sorted_schema_fields:
-
-      a = data_type_mode.split('-')
-      if len(a) >= 2:
-        data_type = a[0]
-        mode = a[1]
-      else:
-        data_type = a[0]
-        mode = None
-
-      if '.' in name:
-
-        chunks = name.split(".")
-
-        parent_names = chunks[0:-1]
-        child_name = chunks[-1]
-
-        field = {}
-        field['name'] = child_name
-        field['mode'] = mode
-        field['type'] = data_type
-
-        parent_field = schema
-
-        # drill down to find the right parent_field
-        for parent_name in parent_names:
-          if type(parent_field) is dict:
-            parent_field = [item for item in parent_field['fields'] if item['name'] == parent_name][0]
-          elif type(parent_field) is list:
-            parent_field = [item for item in parent_field if item['name'] == parent_name][0]
-
-          if parent_field is not None:
-            if 'fields' not in parent_field:
-              parent_field['fields'] = []
-
-        parent_field['fields'].append(field)
-
-      else:
-        field = {}
-        field['name'] = name
-        field['mode'] = mode
-        field['type'] = data_type
-
-        schema.append(field)
-
+    # add hash code to field
     field = {}
-    field['name'] = "hash_code"
+    field['key'] = "hash_code"
     field['mode'] = "nullable"
-    field['type'] = "string"
-    schema.append(field)
+    field['data_type'] = "string"
+    schema_fields.append(field)
 
-    pprint.pprint(schema)
-    return schema
+    return schema_fields
 
 
   def get_fragments(self):
@@ -389,25 +353,20 @@ class Loader:
 
   def load_dw (self):
 
-    table_schema = self.generate_table_schema()
-    schema_json = json.dumps(table_schema)
-
-    schema_file_name = "%s_schema.json" % (self.collection_name)
-    schema_file = open(schema_file_name, "w")
-    schema_file.write(schema_json)
-    schema_file.close()
+    # retrieve schema fields from mongodb schema collection
+    schema_fields = self.retrieve_schema_fields()
 
     # create tables
     if self.write_disposition == 'overwrite':
       if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
         self.dw.delete_table(self.dw_database_name, self.dw_table_name)
-      self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
+      self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_fields, self.process_array)
     else:
       # if append, update table.
       if self.dw.table_exists(self.dw_database_name, self.dw_table_name):
-        self.dw_table_names = self.dw.update_table(self.dw_database_name, self.dw_table_name, schema_file_name)
+        self.dw_table_names = self.dw.update_table(self.dw_database_name, self.dw_table_name, schema_fields)
       else:
-        self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_file_name, self.process_array)
+        self.dw_table_names = self.dw.create_table(self.dw_database_name, self.dw_table_name, schema_fields, self.process_array)
 
     # load data
     fragment_values = self.get_fragments()

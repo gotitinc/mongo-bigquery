@@ -18,7 +18,8 @@ Arrays are typically split into a different (child) Hive table with parent/child
 
 1. You have a Hadoop cluster.
 2. You can SSH to the master node.
-3. In each node, the following is installed:
+3. Make sure `hadoop` program is in your `PATH`.
+4. In each node, the following is installed:
   * python (2.6+)
   * pip
   * pymongo

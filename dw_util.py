@@ -16,6 +16,7 @@
 import json
 import abc
 import re
+import pprint
 
 
 class DataWarehouse:
@@ -30,11 +31,11 @@ class DataWarehouse:
     return
 
   @abc.abstractmethod
-  def create_table(self, database_name, table_name, schema_file_name, process_array):
+  def create_table(self, database_name, table_name, schema_fields, process_array):
     return
 
   @abc.abstractmethod
-  def update_table(self, database_name, table_name, schema_file_name):
+  def update_table(self, database_name, table_name, schema_fields):
     return
 
   @abc.abstractmethod
@@ -116,73 +117,49 @@ class Hive(DataWarehouse):
   def delete_dataset(self, database_name):
     pass
 
-  def flatten(self, schema, fields, parent=None):
-    for node in schema:
-      if node["mode"].lower() == "repeated":
-        if parent == None:
-          if "fields" in node:
-            self.flatten(node["fields"], fields, node["name"])
-            del node['fields']
-        else:
-          if "fields" in node:
-            self.flatten(node["fields"], fields, parent + "." + node["name"])
-            del node['fields']
-
-      if parent != None:
-        node["name"] = parent + "." + node["name"]
-
-      fields.append(node)
-
-  def create_table(self, database_name, table_name, schema_file_name, process_array = "child_table"):
-
-    # load schema from file
-    schema = json.load(open(schema_file_name))
-
-    # flatten
-    fields = []
-    self.flatten(schema, fields, None)
+  def create_table(self, database_name, table_name, schema_fields, process_array = "child_table"):
 
     # used to keep track of table_name -> column list
     table_columns = {}
 
-    for field in fields:
+    for field in schema_fields:
       data_type = None
 
-      if field['type'] == 'string':
+      if field['data_type'] == 'string':
         data_type = 'string'
-      elif field['type'] in ('timestamp', 'boolean'):
+      elif field['data_type'] in ('timestamp', 'boolean'):
         data_type = field['type']
-      elif field['type'] == 'float':
+      elif field['data_type'] == 'float':
         data_type = 'double'
-      elif field['type'] ==  'integer':
+      elif field['data_type'] ==  'integer':
         data_type = 'int'
-      elif field['type'] in ('record'):
+      elif field['data_type'] in ('record'):
         # ignore record
         pass
       else:
-        raise Exception("Unsupported data type %s for column %s" % (field['type'], field['name']))
+        raise Exception("Unsupported data type %s for column %s" % (field['data_type'], field['key']))
 
       if data_type is not None:
         if field['mode'] == 'repeated':
           if process_array == "child_table":
-            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key']).lower()
             column_name = "value"
           else:
             continue
         else:
-          if "." in field['name']:
+          if "." in field['key']:
             if process_array == "child_table":
-              child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
-              column_name = field['name'].rsplit(".",1)[1]
+              child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key'].rsplit(".",1)[0]).lower()
+              column_name = field['key'].rsplit(".",1)[1]
               print "  Child Table column:" + column_name
             else:
               child_table_name = table_name
-              column_name = field['name'].split(".",1)[0]
+              column_name = field['key'].split(".",1)[0]
               data_type = "string"
               print "  Inline column:" + column_name
           else:
             child_table_name = table_name
-            column_name = field['name']
+            column_name = field['key']
 
         if child_table_name not in table_columns:
           table_columns[child_table_name] = set()
@@ -198,14 +175,7 @@ class Hive(DataWarehouse):
 
     return table_columns.keys()
 
-  def update_table(self, database_name, table_name, schema_file_name):
-
-    # load schema from file
-    schema = json.load(open(schema_file_name))
-
-    # flatten
-    fields = []
-    self.flatten(schema, fields, None)
+  def update_table(self, database_name, table_name, schema_fields):
 
     # current columns
     table_names = self.list_tables(database_name, table_name)
@@ -214,7 +184,7 @@ class Hive(DataWarehouse):
       current_columns = {}
       current_schema = self.get_table_schema(database_name, table_name)
       for field in current_schema:
-        current_columns[field['name']] = field['type']
+        current_columns[field['key']] = field['data_type']
       current_table_columns[table_name] = current_columns
 
     # used to keep track of table_name -> column list
@@ -223,45 +193,45 @@ class Hive(DataWarehouse):
     alter_sqls = []
     modify_instructions = {}
 
-    for field in fields:
+    for field in schema_fields:
 
       # print "processing field %s" % str(field)
       sql_data_type = None
 
-      if field['type'] == 'string':
+      if field['data_type'] == 'string':
         sql_data_type = 'string'
-      elif field['type'] in ('timestamp', 'boolean'):
+      elif field['data_type'] in ('timestamp', 'boolean'):
         sql_data_type = field['type']
-      elif field['type'] == 'float':
+      elif field['data_type'] == 'float':
         sql_data_type = 'double'
-      elif field['type'] ==  'integer':
+      elif field['data_type'] ==  'integer':
         sql_data_type = 'int'
-      elif field['type'] in ('record'):
+      elif field['data_type'] in ('record'):
         # ignore record
         pass
       else:
-        raise Exception("Unsupported data type %s for column %s" % (field['type'], field['name']))
+        raise Exception("Unsupported data type %s for column %s" % (field['data_type'], field['key']))
 
       if sql_data_type is not None:
 
         if field['mode'] == 'repeated':
-          child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name']).lower()
+          child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key']).lower()
           column_name = "value"
         else:
-          if "." in field['name']:
-            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['name'].rsplit(".",1)[0]).lower()
-            column_name = field['name'].rsplit(".",1)[1]
+          if "." in field['key']:
+            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key'].rsplit(".",1)[0]).lower()
+            column_name = field['key'].rsplit(".",1)[1]
           else:
             child_table_name = table_name
-            column_name = field['name']
+            column_name = field['key']
 
         # print "column name %s" % column_name
         if child_table_name in current_table_columns:
           current_columns = current_table_columns[child_table_name]
           if column_name in current_columns:
             print "  column %s found in current table schema." % column_name
-            if field['type'].lower() != current_columns[column_name].lower():
-              print "  but data type is different. new: %s old: %s" % (field['type'], current_columns[column_name])
+            if field['data_type'].lower() != current_columns[column_name].lower():
+              print "  but data type is different. new: %s old: %s" % (field['data_type'], current_columns[column_name])
               if child_table_name not in modify_instructions:
                 modify_instructions[child_table_name] = {}
               modify_instructions[child_table_name][column_name] = sql_data_type
@@ -342,7 +312,7 @@ class Hive(DataWarehouse):
       elif 'boolean' in row[1]:
         d['type'] = 'BOOLEAN'
 
-      d['name'] = row[0]
+      d['key'] = row[0]
       d['mode'] = 'NULLABLE'
       fields.append(d)
 

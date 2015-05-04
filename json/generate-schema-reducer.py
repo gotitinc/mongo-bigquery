@@ -27,49 +27,69 @@ error_stream = codecs.getwriter("utf-8")(sys.stderr)
 mongo_schema_collection = None
 
 
-def process_new_field(key, datatype):
+def parse_datatype_mode (datatype_mode):
+  a = datatype_mode.split("-")
+  if len(a) >= 2:
+    return (a[0], a[1])
+  else:
+    raise ValueError('Invalid datatype / mode tuple %s' % datatype_mode)
 
-  if key is not None and datatype is not None:
+
+def process_new_field(key, datatype_mode):
+
+  if key is not None and datatype_mode is not None:
     # check if key is already in mongodb
-    orig_datatype_record = mongo_schema_collection.find_one({"key": key, "type": "field"})
+    orig_field_record = mongo_schema_collection.find_one({"key": key, "type": "field"})
 
     # compare orig data type and save schema to mongodb
-    if orig_datatype_record is not None:
-      orig_datatype = orig_datatype_record['data_type']
-      if 'forced' not in orig_datatype:
-        new_datatype = max_datatype(orig_datatype, datatype)
-        print key, new_datatype
-        mongo_schema_collection.find_one_and_update({"key": key, "type": "field"}, {"$set": {"data_type": new_datatype}})
+    if orig_field_record is not None:
+      orig_datatype_mode = orig_field_record['data_type'] + "-" + orig_field_record['mode']
+
+      forced = False
+      if 'forced' in orig_field_record and orig_field_record['forced'] == True:
+        forced = True
+
+      # if 'forced' not in orig_datatype:
+      if not forced:
+        new_datatype_mode = max_datatype_mode(orig_datatype_mode, datatype_mode)
+
+        (new_datatype, new_mode) = parse_datatype_mode(new_datatype_mode)
+        mongo_schema_collection.find_one_and_update({"key": key, "type": "field"},
+                                                    {"$set": {"data_type": new_datatype,
+                                                              "mode": new_mode}})
 
     else:
-      print key, datatype
-      mongo_schema_collection.insert_one({"key": key, "type": "field", "data_type": datatype})
+      (datatype, mode) = parse_datatype_mode(datatype_mode)
+      mongo_schema_collection.insert_one({"key": key,
+                                          "type": "field",
+                                          "data_type": datatype,
+                                          "mode": mode})
 
 
-def max_datatype (datatype1, datatype2):
+def max_datatype_mode (datatype_mode_1, datatype_mode_2):
 
-  if datatype1 == datatype2:
-    return datatype1
+  if datatype_mode_1 == datatype_mode_2:
+    return datatype_mode_1
 
-  if datatype1 == 'record-repeated' or datatype2 == 'record-repeated':
+  if datatype_mode_1 == 'record-repeated' or datatype_mode_2 == 'record-repeated':
     return 'record-repeated'
 
-  if datatype1 == 'string-repeated' or datatype2 == 'string-repeated':
+  if datatype_mode_1 == 'string-repeated' or datatype_mode_2 == 'string-repeated':
     return 'string-repeated'
 
-  if datatype1 == 'repeated-nullable' or datatype2 == 'repeated-nullable':
+  if datatype_mode_1 == 'repeated-nullable' or datatype_mode_2 == 'repeated-nullable':
     return 'repeated-nullable'
 
-  if datatype1 == 'record-nullable' or datatype2 == 'record-nullable':
+  if datatype_mode_1 == 'record-nullable' or datatype_mode_2 == 'record-nullable':
     return 'record-nullable'
 
-  if datatype1 == 'string-nullable' or datatype2 == 'string-nullable':
+  if datatype_mode_1 == 'string-nullable' or datatype_mode_2 == 'string-nullable':
     return 'string-nullable'
 
-  if datatype1 == 'float-nullable' and datatype2 == 'integer-nullable':
+  if datatype_mode_1 == 'float-nullable' and datatype_mode_2 == 'integer-nullable':
     return 'float-nullable'
 
-  if datatype1 == 'integer-nullable' and datatype2 == 'float-nullable':
+  if datatype_mode_1 == 'integer-nullable' and datatype_mode_2 == 'float-nullable':
     return 'float-nullable'
 
   return 'string-nullable'
@@ -102,7 +122,7 @@ def main(argv):
     usage()
 
   current_key = None
-  current_datatype = None
+  current_datatype_mode = None
   key = None
 
   # input comes from STDIN
@@ -112,21 +132,21 @@ def main(argv):
     line = line.strip()
 
     # parse the input we got from mapper.py
-    (key, datatype) = line.split('\t', 1)
+    (key, datatype_mode) = line.split('\t', 1)
 
     # this IF-switch only works because Hadoop sorts map output
     # by key (here: key) before it is passed to the reducer
     if current_key == key:
-      current_datatype = max_datatype(current_datatype, datatype)
+      current_datatype_mode = max_datatype_mode(current_datatype_mode, datatype_mode)
     else:
       if current_key:
-        process_new_field(current_key, current_datatype)
-      current_datatype = datatype
+        process_new_field(current_key, current_datatype_mode)
+      current_datatype_mode = datatype_mode
       current_key = key
 
   # do not forget to output the last key if needed!
   if current_key == key:
-    process_new_field(current_key, current_datatype)
+    process_new_field(current_key, current_datatype_mode)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ import socket
 import subprocess
 import codecs
 import hashlib
+import pprint
 from pymongo import MongoClient
 
 # create utf reader and writer for stdin and stdout
@@ -120,13 +121,12 @@ def clean_data(line, line_num, parent = None, parent_hash_code = None, is_array 
           line_num, full_key, line)
         continue
 
-      data_type_mode = schema[full_key].split("-")
-      data_type = data_type_mode[0]
-      mode = data_type_mode[1]
+      data_type = schema[full_key]["data_type"]
+      mode = schema[full_key]["mode"]
 
       data_type_forced = False
-      if len(data_type_mode) >= 3:
-        data_type_forced = (data_type_mode[2] == 'forced')
+      if 'forced' in schema[full_key]:
+        data_type_forced = schema[full_key]['forced']
 
       if data_type == 'record':
 
@@ -438,8 +438,7 @@ def main(argv):
 
   # read schema from mongodb server
   schema_fields = mongo_schema_collection.find({"type": "field"})
-  for schema_field in schema_fields:
-    schema[schema_field['key']] = schema_field['data_type']
+  schema = dict((schema_field['key'], schema_field) for schema_field in schema_fields)
 
   # read process_array from redis
   # if redis_server.hget('%s/policy' % app_id, "process_array") != None:
