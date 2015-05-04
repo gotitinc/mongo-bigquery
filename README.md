@@ -326,8 +326,8 @@ Use the specified file for policies which you can use to configure required fiel
 
 Policy manager is used to control schema generation. With the policy manager, you can:
 
-1. Specify required fields.
-2. Overwrite data type for certain fields.
+1. Specify required fields. If the field is missing, the document is rejected. Rejected documents are saved in `[TMP_PATH]/[collection_name]/rejected` folder.
+2. Enforce data type for certain fields. In the example below, `age` is forced to be integer. So if there is a document that contains non-integer, the field will be null.
 
 Example policy file:
 
@@ -339,7 +339,7 @@ Example policy file:
     },
     {
         "field_name": "age",
-        "data_type_overwrite": "int"
+        "data_type_overwrite": "integer-nullable"
     }
 ]
 ```
