@@ -335,12 +335,12 @@ Example policy file:
 ```
 [
     {
-        "field_name": "last_name",
+        "key": "last_name",
         "required": true
     },
     {
-        "field_name": "age",
-        "data_type_overwrite": "integer-nullable"
+        "key": "address.zipcode",
+        "data_type": "integer"
     }
 ]
 ```

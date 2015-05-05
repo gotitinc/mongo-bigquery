@@ -39,12 +39,24 @@ mapreduce_params["mapred.task.timeout"] = "12000000"
 MAPREDUCE_PARAMS_STR = ' '.join(["-D %s=%s"%(k,v) for k,v in mapreduce_params.iteritems()])
 
 
+# helper function to split "[datatype]-[mode]" into datatype and mode
 def parse_datatype_mode (datatype_mode):
   a = datatype_mode.split("-")
   if len(a) >= 2:
     return (a[0], a[1])
   else:
     raise ValueError('Invalid datatype / mode tuple %s' % datatype_mode)
+
+# helper function to check if "address.zip_code" is in data by spliting the jsonpath by "."
+def jsonpath_get(mydict, path):
+  elem = mydict
+  try:
+    for x in path.split("."):
+      elem = elem.get(x)
+  except:
+    pass
+
+  return elem
 
 
 class Loader:
@@ -106,20 +118,24 @@ class Loader:
     # turn policies into better data structure for use later (required_fields)
     if self.policies != None:
       for policy in self.policies:
-        if 'field_name' in policy:
+        if 'key' in policy:
           if 'required' in policy:
-            if policy['field_name'] not in self.required_fields == None:
-              self.required_fields[policy['field_name']] = {}
-            self.required_fields[policy['field_name']] = policy
+            if policy['key'] not in self.required_fields == None:
+              self.required_fields[policy['key']] = {}
+            self.required_fields[policy['key']] = policy
 
-          if 'data_type_overwrite' in policy:
-            datatype_mode_overwrite = policy['data_type_overwrite']
-            (forced_datatype, forced_mode) = parse_datatype_mode(datatype_mode_overwrite)
+          if 'data_type' in policy:
+            datatype_overwrite = policy['data_type']
+
+            if 'mode' in policy:
+              mode_overwrite = policy['mode']
+            else:
+              mode_overwrite = 'nullable'
 
             self.mongo_schema_collection.update_one(
-              {"key": policy['field_name'], "type": "field"},
-              {"$set": {"data_type": forced_datatype,
-                        "mode": forced_mode,
+              {"key": policy['key'].replace(".", "_"), "type": "field"},
+              {"$set": {"data_type": datatype_overwrite,
+                        "mode": mode_overwrite,
                         "forced": True}},
               upsert = True)
 
@@ -189,7 +205,7 @@ class Loader:
       # validate policies
       rejected = False
       for required_field_name, policy in self.required_fields.iteritems():
-        if policy['required'] and required_field_name not in data:
+        if policy['required'] and jsonpath_get(data, required_field_name) is None:
 
           # --------------------------------------------------------
           # document found that doesn't contain required fields.
@@ -393,15 +409,17 @@ class Loader:
     # extract data from Mongo
     self.extract_data()
 
-    # generate schema
-    if self.use_mr:
-      self.mr_schema_gen()
-      self.mr_data_transform()
-    else:
-      self.simple_schema_gen()
-      self.simple_data_transform()
+    if self.num_records_extracted > 0:
+      # generate schema and transform data
+      if self.use_mr:
+        self.mr_schema_gen()
+        self.mr_data_transform()
+      else:
+        self.simple_schema_gen()
+        self.simple_data_transform()
 
-    self.load_dw()
+      # Create data warehouse tables and load data into them
+      self.load_dw()
 
     print '-------------------'
     print '    RUN SUMMARY'

@@ -302,18 +302,18 @@ class Hive(DataWarehouse):
     for row in r:
       d = {}
       if 'string' in row[1]:
-        d['type'] = 'STRING'
+        d['data_type'] = 'string'
       elif 'float' in row[1] or 'double' in row[1]:
-        d['type'] = 'FLOAT'
+        d['data_type'] = 'float'
       elif 'int' in row[1] or 'bigint' in row[1]:
-        d['type'] = 'INTEGER'
+        d['data_type'] = 'integer'
       elif 'timestamp' in row[1]:
-        d['type'] = 'TIMESTAMP'
+        d['data_type'] = 'timestamp'
       elif 'boolean' in row[1]:
-        d['type'] = 'BOOLEAN'
+        d['data_type'] = 'boolean'
 
       d['key'] = row[0]
-      d['mode'] = 'NULLABLE'
+      d['mode'] = 'nullable'
       fields.append(d)
 
     return fields
