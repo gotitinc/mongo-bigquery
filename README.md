@@ -1,18 +1,18 @@
-# Mongo - Hive Connector
+# Mongo - Google Big Query Connector
 
-Super-easy way to load your MongoDB collection into Hive. The code creates Hive schema automatically by performing a deep inspection of each MongoDB record and deriving the data type of each field. Supports basic data types, nested objects, array of primitive data types and array of objects.
+Super-easy way to load your MongoDB collection into Google BigQuery. The code creates Google BigQuery schema automatically by performing a deep inspection of each MongoDB record and deriving the data type of each field. Supports basic data types, nested objects, array of primitive data types and array of objects.
 
 Nested fields are flattened out into columns.
 
-Arrays are typically split into a different (child) Hive table with parent/child relationship with the root table.
+Arrays are typically split into a different (child) BigQuery table with parent/child relationship with the root table.
 
 ## How it works
 
-1. Connects to your MongoDB and extract the specified collection into local file which is then copied to HDFS.
+1. Connects to your MongoDB and extract the specified collection into local file which is then copied to Google Cloud Storage.
 2. MapReduce generates schema (a copy is saved back to MongoDB for info).
-3. MapReduce transforms data, breaking the array into multiple files in HDFS output folder.
-4. Create Hive tables using schema generated in step 2.
-5. Load Hive tables using HDFS files generated in step 3.
+3. MapReduce transforms data, breaking the array into multiple files in Google Cloud Storage output folder.
+4. Create BigQuery tables using schema generated in step 2.
+5. Load BigQuery tables using Google Cloud Storage files generated in step 3.
 
 ## Pre-requisites
 
@@ -40,20 +40,11 @@ pip install pymongo
   cd java/MapReduce
   mvn package
   ```
-3. Run this to compile JSON Serde:
- 
-  ```
-  cd java/HiveSerdes
-  mvn package
-  ```
+3. Make sure you have gcloud command line utilities installed in your Hadoop master mode. Executables that this program depends on are:
 
-4. Install Python pyhs2 package to connect to Hive Server:
- 
   ```
-  yum install gcc-c++
-  yum install cyrus-sasl-devel.x86_64
-  yum install python-devel.x86_64
-  pip install pyhs2
+  gsutil
+  bq
   ```
 
 In `onefold.py`, near the top, there are a few configuration that you can customized. Make sure these variables are set correctly before proceeding.
@@ -62,13 +53,9 @@ In `onefold.py`, near the top, there are a few configuration that you can custom
 
 Where the script will store extracted data from MongoDB.
 
-`HDFS_PATH`
+`CLOUD_STORAGE_PATH`
 
-HDFS Path where it will store files for MapReduce and Hive.
-
-`HADOOP_MAPREDUCE_STREAMING_LIB`
-
-Make sure this points to a valid `hadoop-streaming.jar`. The default value is set for Hortonworks HDP 2.2.
+Google Cloud Storage Path where it will store files for MapReduce and BigQuery.
 
 
 ## Usage
@@ -78,61 +65,76 @@ Say you have a MongoDB collection called "test.users", and you have some records
 
 ```
 > db.users.find();
-{ "_id" : ObjectId("55426ac7151a4b4d32000001"), "mobile" : { "carrier" : "Sprint", "device" : "Samsung" }, "name" : "John Doe", "age" : 24, "utm_campaign" : "Facebook_Offer", "app_version" : "2.4", "address" : { "city" : "Chicago", "zipcode" : 94012 } }
+{ "_id" : ObjectId("5688d0855d53fc2c133f3429"), "mobile" : { "carrier" : "Sprint", "device" : "Samsung" }, "name" : "John Doe", "age" : 24, "utm_campaign" : "Facebook_Offer", "app_version" : "2.4", "address" : { "city" : "Chicago", "zipcode" : 94012 } }
 ```
 
-To load this into Hive,
+To load this into BigQuery,
 
 ```
 ./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
              --source_db test \
              --source_collection users \
-             --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port]
+             --infra_type gcloud \
+             --dest_db_name test \
+             --dest_table_name users \
+             --gcloud_project_id [google_cloud_project_id] \
+             --gcloud_storage_bucket_id [google_cloud_storage_bucket_id]
 ```
 
 Results:
 ```
--- Initializing Hive Util --
+-- Initializing Google BigQuery module --
 Creating file /tmp/onefold_mongo/users/data/1
-Executing command: cat /tmp/onefold_mongo/users/data/1 | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py mongodb://xxx:xxx/test/users_schema > /dev/null
-Executing command: cat /tmp/onefold_mongo/users/data/1 | json/transform-data-mapper.py mongodb://xxx:xxx/test/users_schema,/tmp/onefold_mongo/users/data_transform/output > /dev/null
+Executing command: cat /tmp/onefold_mongo/users/data/1 | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py mongodb://localhost:27017/test/users_schema > /dev/null
+Executing command: cat /tmp/onefold_mongo/users/data/1 | json/transform-data-mapper.py mongodb://localhost:27017/test/users_schema,/tmp/onefold_mongo/users/data_transform/output > /dev/null
 ...
-Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/root
-Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/root/part-00000 onefold_mongo/users/data_transform/output/root/
-..
-Executing HiveQL: show tables
-Executing HiveQL: create table users (app_version string,utm_campaign string,id_oid string,age int,mobile_device string,name string,address_city string,hash_code string,mobile_carrier string,address_zipcode int) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
-Executing HiveQL: load data inpath 'onefold_mongo/users/data_transform/output/root/*' into table users
+Executing command: gsutil -m rm -rf gs://mongo-gbq-bucket/onefold_mongo/users/data_transform/output/
+Removing gs://mongo-gbq-bucket/onefold_mongo/users/data_transform/output/root/part-00000#1451806915461000...
+copy_from_local: /tmp/onefold_mongo/users/data_transform/output/root/part-00000 onefold_mongo/users/data_transform/output/root/
+Executing command: gsutil -m cp /tmp/onefold_mongo/users/data_transform/output/root/part-00000 gs://mongo-gbq-bucket/onefold_mongo/users/data_transform/output/root/part-00000
+...
+Executing command: bq --project_id mongo-gbq --format csv ls test
+Executing command: bq --project_id mongo-gbq mk --schema users_schema.json test.users
+Table 'mongo-gbq:test.users' successfully created.
+Loading fragment: root
+Executing command: bq --project_id mongo-gbq --nosync load --source_format NEWLINE_DELIMITED_JSON test.users gs://mongo-gbq-bucket/onefold_mongo/users/data_transform/output/root/*
+Successfully started load mongo-gbq:bqjob_r4d275de6da77baf3_0000015206702df7_1
 -------------------
     RUN SUMMARY
 -------------------
-Extracted data with _id from 55426ac7151a4b4d32000001 to 55426ac7151a4b4d32000001
+Num records extracted 1
+Num records rejected 0
+Extracted data with _id from 5688d0855d53fc2c133f3429 to 5688d0855d53fc2c133f3429
 Extracted files are located at: /tmp/onefold_mongo/users/data/1
-Hive Tables: users
+Destination Tables: users
 Schema is stored in Mongo test.users_schema
 ```
 
-In Hive, you can see:
+In Google BigQuery, you can see:
 ```
-hive> add jar [install_path]/java/HiveSerdes/target/hive-serdes-1.0-SNAPSHOT.jar;
+$ bq show test.users
+Table mongo-gbq:test.users
 
-hive> desc users;
-app_version             string                  from deserializer
-utm_campaign            string                  from deserializer
-id_oid                  string                  from deserializer
-age                     int                     from deserializer
-mobile_device           string                  from deserializer
-name                    string                  from deserializer
-address_city            string                  from deserializer
-hash_code               string                  from deserializer
-mobile_carrier          string                  from deserializer
-address_zipcode         int                     from deserializer
-Time taken: 0.073 seconds, Fetched: 10 row(s)
+   Last modified             Schema             Total Rows   Total Bytes   Expiration
+ ----------------- --------------------------- ------------ ------------- ------------
+  02 Jan 23:43:12   |- address_city: string     1            141
+                    |- address_zipcode: float
+                    |- age: float
+                    |- app_version: string
+                    |- id_oid: string
+                    |- mobile_carrier: string
+                    |- mobile_device: string
+                    |- name: string
+                    |- utm_campaign: string
+                    |- hash_code: string
 
-hive> select * from users;
-2.4     Facebook_Offer  55426ac7151a4b4d32000001        24      Samsung John Doe        Chicago 863a4ddd10579c8fc7e12b5bd1e188ce083eec2d        Sprint  94012
-Time taken: 0.07 seconds, Fetched: 1 row(s)
+$ bq query "select * from test.users"
+Waiting on bqjob_r710f4e875a413367_000001520674ebba_1 ... (0s) Current status: DONE
++--------------+-----------------+------+-------------+--------------------------+----------------+---------------+----------+----------------+------------------------------------------+
+| address_city | address_zipcode | age  | app_version |          id_oid          | mobile_carrier | mobile_device |   name   |  utm_campaign  |                hash_code                 |
++--------------+-----------------+------+-------------+--------------------------+----------------+---------------+----------+----------------+------------------------------------------+
+| Chicago      |         94012.0 | 24.0 | 2.4         | 5688d0855d53fc2c133f3429 | Sprint         | Samsung       | John Doe | Facebook_Offer | abf9a2ac1ce71feb12418c889b913f8d8361a6d4 |
++--------------+-----------------+------+-------------+--------------------------+----------------+---------------+----------+----------------+------------------------------------------+
 ```
 
 In Mongo, you can see the schema saved in a collection called `users_schema`:
@@ -157,126 +159,139 @@ Notes:
 
 1. By default, extracted data is saved in `/tmp/onefold_mongo`. It can be changed by specifying the `tmp_path` parameter.
 2. If `--use_mr` parameter is specified, it will use MapReduce to generate schema and transform data. Otherwise, it runs the mapper and reducer via command line using `cat [input] | mapper | sort | reducer` metaphor. This is handy if you don't have many records and/or just want to get this going quickly.
-3. The generated HDFS files are in JSON format, so in Hive, you need to add the included JSON Serde. In Hive, run this command before select from the generated tables: `add jar [install_path]/hive-serdes-1.0-SNAPSHOT.jar`
-4. Nested objects like `mobile` and `address` in the above example are flattened out in the Hive table.
+3. The generated files are in JSON format.
+4. Nested objects like `mobile` and `address` in the above example are flattened out in the BigQuery table.
 5. `hash_code` column is added. It's basically an SHA1 hash of the object. It's useful later on when we use `hash_code` as parent-child key to represent array in a child table.
 
 
-### Now let's add a record with new fields
+### Now let's try a more complex collection.
 
-In Mongo, one new records is added with some new fields:
+In Mongo, create a `complex_users` collection with the following fields:
 ```
-> db.users.find();
-...
-{ "_id" : ObjectId("55426c42151a4b4d9e000001"), "hobbies" : [ "reading", "cycling" ], "age" : 34, "work_history" : [ { "to" : "present", "from" : 2013, "name" : "IBM" }, { "to" : 2013, "from" : 2003, "name" : "Bell" } ], "utm_campaign" : "Google", "name" : "Alexander Keith", "app_version" : "2.5", "mobile" : { "device" : "iPhone", "carrier" : "Rogers" }, "address" : { "state" : "Ontario", "zipcode" : "M1K3A5", "street" : "26 Marshall Lane", "city" : "Toronto" } }
+> db.complex_users.find()
+{ "_id" : ObjectId("5688d73c5d53fc2c133f342b"), "hobbies" : [ "reading", "cycling" ], "age" : 34, "work_history" : [ { "to" : "present", "from" : 2013, "name" : "IBM" }, { "to" : 2013, "from" : 2003, "name" : "Bell" } ], "utm_campaign" : "Google", "name" : "Alexander Keith", "app_version" : "2.5", "mobile" : { "device" : "iPhone", "carrier" : "Rogers" }, "address" : { "state" : "Ontario", "zipcode" : "M1K3A5", "street" : "26 Marshall Lane", "city" : "Toronto" } }
 ```
-New fields added to `address` nested object.
-`address.zipcode` is now string (used to be integer).
+
 A new `hobbies` field is added that is a string array.
 A new `work_history` field is added that is an array of nested objects.
 
-Run the command with parameters `--write_disposition append` and `--query '{"_id":{"$gt":ObjectId("55426ac7151a4b4d32000001")}}'`:
+Run the following command to load `complex_users` collection into BigQuery:
 ```
 ./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
              --source_db test \
-             --source_collection users \
-             --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port] \
-             --write_disposition append \
-             --query '{"_id":{"$gt":ObjectId("55426f15151a4b4e46000001")}}'
+             --source_collection complex_users \
+             --infra_type gcloud \
+             --dest_db_name test \
+             --dest_table_name complex_users \
+             --gcloud_project_id [google_cloud_project_id] \
+             --gcloud_storage_bucket_id [google_cloud_storage_bucket_id]
 ```
 
 Results:
 ```
--- Initializing Hive Util --
+-- Initializing Google BigQuery module --
+Creating file /tmp/onefold_mongo/complex_users/data/1
+Executing command: cat /tmp/onefold_mongo/complex_users/data/1 | json/generate-schema-mapper.py | sort | json/generate-schema-reducer.py mongodb://localhost:27017/test/complex_users_schema > /dev/null
+Executing command: cat /tmp/onefold_mongo/complex_users/data/1 | json/transform-data-mapper.py mongodb://localhost:27017/test/complex_users_schema,/tmp/onefold_mongo/complex_users/data_transform/output > /dev/null
+Executing command: rm -rf /tmp/onefold_mongo/complex_users/data_transform/output
+Executing command: mkdir -p /tmp/onefold_mongo/complex_users/data_transform/output/root
+Opening file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/root/part-00000
+Opened file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/root/part-00000
+Executing command: mkdir -p /tmp/onefold_mongo/complex_users/data_transform/output/work_history
+Opening file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/work_history/part-00000
+Opened file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/work_history/part-00000
+Executing command: mkdir -p /tmp/onefold_mongo/complex_users/data_transform/output/hobbies
+Opening file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000
+Opened file descriptor /tmp/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000
 ...
-Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/root
-Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/root/part-00000 onefold_mongo/users/data_transform/output/root/
-Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/work_history
-Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/work_history/part-00000 onefold_mongo/users/data_transform/output/work_history/
-Executing command: hadoop fs -mkdir -p onefold_mongo/users/data_transform/output/hobbies
-Executing command: hadoop fs -copyFromLocal /tmp/onefold_mongo/users/data_transform/output/hobbies/part-00000 onefold_mongo/users/data_transform/output/hobbies/
+Executing command: gsutil -m rm -rf gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/
+copy_from_local: /tmp/onefold_mongo/complex_users/data_transform/output/root/part-00000 onefold_mongo/complex_users/data_transform/output/root/
+Executing command: gsutil -m cp /tmp/onefold_mongo/complex_users/data_transform/output/root/part-00000 gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/root/part-00000
+Copying file:///tmp/onefold_mongo/complex_users/data_transform/output/root/part-00000 [Content-Type=application/octet-stream]...
+copy_from_local: /tmp/onefold_mongo/complex_users/data_transform/output/work_history/part-00000 onefold_mongo/complex_users/data_transform/output/work_history/
+Executing command: gsutil -m cp /tmp/onefold_mongo/complex_users/data_transform/output/work_history/part-00000 gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/work_history/part-00000
+Copying file:///tmp/onefold_mongo/complex_users/data_transform/output/work_history/part-00000 [Content-Type=application/octet-stream]...
+copy_from_local: /tmp/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000 onefold_mongo/complex_users/data_transform/output/hobbies/
+Executing command: gsutil -m cp /tmp/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000 gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000
+Copying file:///tmp/onefold_mongo/complex_users/data_transform/output/hobbies/part-00000 [Content-Type=application/octet-stream]...
 ...
-Executing HiveQL: alter table `users` change `address_zipcode` `address_zipcode` string
-Executing HiveQL: alter table `users` add columns (`address_state` string)
-Executing HiveQL: alter table `users` add columns (`address_street` string)
-Executing HiveQL: create table `users_hobbies` (parent_hash_code string,hash_code string,`value` string) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
-Executing HiveQL: create table `users_work_history` (parent_hash_code string,hash_code string,`from` int,`name` string,`to` string) ROW FORMAT SERDE 'com.cloudera.hive.serde.JSONSerDe'
-...
+Executing command: bq --project_id mongo-gbq mk --schema complex_users_schema.json test.complex_users
+Table 'mongo-gbq:test.complex_users' successfully created.
+Executing command: bq --project_id mongo-gbq mk --schema complex_users_work_history_schema.json test.complex_users_work_history
+Table 'mongo-gbq:test.complex_users_work_history' successfully created.
+Executing command: bq --project_id mongo-gbq mk --schema complex_users_hobbies_schema.json test.complex_users_hobbies
+Table 'mongo-gbq:test.complex_users_hobbies' successfully created.
+Loading fragment: root
+Executing command: bq --project_id mongo-gbq --nosync load --source_format NEWLINE_DELIMITED_JSON test.complex_users gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/root/*
+Successfully started load mongo-gbq:bqjob_r4fe3384c09234c1d_00000152068b5e85_1
+Loading fragment: work_history
+Executing command: bq --project_id mongo-gbq --nosync load --source_format NEWLINE_DELIMITED_JSON test.complex_users_work_history gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/work_history/*
+Successfully started load mongo-gbq:bqjob_r138de33f6e2058cc_00000152068b62aa_1
+Loading fragment: hobbies
+Executing command: bq --project_id mongo-gbq --nosync load --source_format NEWLINE_DELIMITED_JSON test.complex_users_hobbies gs://mongo-gbq-bucket/onefold_mongo/complex_users/data_transform/output/hobbies/*
+Successfully started load mongo-gbq:bqjob_r361aa8424636d4a0_00000152068b689e_1
 -------------------
     RUN SUMMARY
 -------------------
-Extracted data with _id from 55426f52151a4b4e5a000001 to 55426f52151a4b4e5a000001
-Extracted files are located at: /tmp/onefold_mongo/users/data/1
-Hive Tables: users users_hobbies users_work_history
-Schema is stored in Mongo test.users_schema
+Num records extracted 1
+Num records rejected 0
+Extracted data with _id from 5688d73c5d53fc2c133f342b to 5688d73c5d53fc2c133f342b
+Extracted files are located at: /tmp/onefold_mongo/complex_users/data/1
+Destination Tables: complex_users complex_users_work_history complex_users_hobbies
+Schema is stored in Mongo test.complex_users_schema
 ```
 
-In Hive, two new tables are created: `users_hobbies` and `users_work_history`
+In BigQuery, three new tables are created: `complex_users`, `complex_users_hobbies` and `complex_users_work_history`
 ```
-hive> show tables;
-users
-users_hobbies
-users_work_history
+$ bq ls test
+           tableId             Type
+ ---------------------------- -------
+  complex_users                TABLE
+  complex_users_hobbies        TABLE
+  complex_users_work_history   TABLE
 
-hive> desc users_hobbies;
-OK
-parent_hash_code        string                  from deserializer
-hash_code               string                  from deserializer
-value                   string                  from deserializer
-Time taken: 0.068 seconds, Fetched: 3 row(s)
+$ bq show test.complex_users
+Table mongo-gbq:test.complex_users
 
-hive> desc users_work_history;
-OK
-parent_hash_code        string                  from deserializer
-hash_code               string                  from deserializer
-from                    int                     from deserializer
-name                    string                  from deserializer
-to                      string                  from deserializer
-Time taken: 0.067 seconds, Fetched: 5 row(s)
+   Last modified              Schema             Total Rows   Total Bytes   Expiration
+ ----------------- ---------------------------- ------------ ------------- ------------
+  03 Jan 00:12:48   |- address_city: string      1            166
+                    |- address_state: string
+                    |- address_street: string
+                    |- address_zipcode: string
+                    |- age: float
+                    |- app_version: string
+                    |- id_oid: string
+                    |- mobile_carrier: string
+                    |- mobile_device: string
+                    |- name: string
+                    |- utm_campaign: string
+                    |- hash_code: string
+
+$ bq show test.complex_users_hobbies
+Table mongo-gbq:test.complex_users_hobbies
+
+   Last modified              Schema              Total Rows   Total Bytes   Expiration
+ ----------------- ----------------------------- ------------ ------------- ------------
+  03 Jan 00:12:49   |- parent_hash_code: string   2            102
+                    |- hash_code: string
+                    |- value: string
+
+$ bq show test.complex_users_work_history
+Table mongo-gbq:test.complex_users_work_history
+
+   Last modified              Schema              Total Rows   Total Bytes   Expiration
+ ----------------- ----------------------------- ------------ ------------- ------------
+  03 Jan 00:12:47   |- parent_hash_code: string   2            212
+                    |- hash_code: string
+                    |- from: float
+                    |- name: string
+                    |- to: string
 ```
 
 You can join parent and child table like:
 ```
-hive> select * from users join users_hobbies on users.hash_code = users_hobbies.parent_hash_code
-                          join users_work_history on users.hash_code = users_work_history.parent_hash_code;
-```
-
-### More Examples
-
-You can provide your own schema collection name.
-
-```
-./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
-             --source_db test \
-             --source_collection users \
-             --schema_db test \
-             --schema_collection users_schema \
-             --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port]
-```
-
-You can specify the name of Hive table generated.
-
-```
-./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
-             --source_db test \
-             --source_collection users \
-             --hive_db_name our_mongo_db \
-             --hive_table_name our_mongo_users \
-             --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port]
-```
-
-By default, the program doesn't use MapReduce. If you want to use MapReduce, use the `--use_mr` flag.
-
-```
-./onefold.py --mongo mongodb://[mongodb_host]:[mongodb_port] \
-             --source_db test \
-             --source_collection users \
-             --use_mr \
-             --hiveserver_host [hive_server_host] \
-             --hiveserver_port [hive_server_port]
+$ bq query "select * from test.complex_users join test.complex_users_hobbies on test.complex_users.hash_code = test.complex_users_hobbies.parent_hash_code"
 ```
 
 ## Parameters
@@ -290,12 +305,6 @@ The MongoDB database name from which to extract data.
 `--source_collection`
 The MongoDB collection name from which to extract data.
 
-`--hiveserver_host`
-Hive server host.
-
-`--hiveserver_port`
-Hive server port.
-
 `--query`
 Optional query users can specify when doing extraction. Useful for filtering out only incremental records. See below for some examples.
 
@@ -308,20 +317,27 @@ Optional. The MongoDB database name to which schema data is written. Default to 
 `--schema_collection`
 Optional. The MongoDB collection to which schema data is written. Default to `[source_collection]_schema`.
 
-`--write_disposition`
-Optional. Valid values are `overwrite` and `append`. Tells the program whether to overwrite the Hive table or to append to existing table.
+`--dest_db_name`
+Optional. The BigQuery dataset to use.
 
-`--hive_db_name`
-Optional. The Hive database to use. If not specified, it will use `default` database.
-
-`--hive_table_name`
-Optional. The Hive table name to use. If not specified, it will use source collection name.
+`--dest_table_name`
+Optional. The BigQuery table name to use. If not specified, it will use source collection name.
 
 `--use_mr`
 If this parameter is specified, the program will use MapReduce to generate schema and transform data. If not, the mapper and reducer will be executed as command line using the `cat [input] | mapper | sort | reducer` metaphore. This is useful for small data set and if you just want to get things up and running quickly.
 
 `--policy_file`
 Use the specified file for policies which you can use to configure required fields, etc. See below for supported policies
+
+`--infra_type`
+Specify `gcloud` for Google BigQuery
+
+`--gcloud_project_id`
+Specify the Google Cloud project id
+
+`--gcloud_storage_bucket_id`
+Specify the bucket ID of the Google Cloud Storage bucket to use for file storage
+
 
 ## Policy Manager
 
@@ -364,11 +380,5 @@ To query for _id > 55401a60151a4b1a4f000001:
 
 * There is no easy way to capture records that were updated in MongoDB. We are working on capturing oplog and replay inserts and updates.
 * The ways in which the data type of a given changes over time is huge. A field can change from an int, to a string, to an array of string, to an array of mix types, to an array of complex objects over time. We haven't tested all the different combinations, but very interested in support as many as we can. Let us know if you have found a case that we don't support well.
-* We don't use Hive's built-in complex data types like struct and arrays. That is coming in the next release. Let us know if that's something you are very interested in.
-
-## FAQ
-
-## Support
-
-Email jorge@onefold.io.
+* Currently since BigQuery doesn't support alter-table, we can only support `overwrite` mode.
 
