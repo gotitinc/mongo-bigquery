@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 #
-# Author: Raghav Rastogi
+# Author: Jorge Chang
 #
 # Cloud Storage utility - abstraction of all cloud storage related calls.
 # Implementation for Hadoop and Google Cloud Storage provided. Basic functionaliy

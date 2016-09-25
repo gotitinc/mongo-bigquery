@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 
 #
-# Copyright 2015, OneFold
-# All rights reserved.
-# http://www.onefold.io
-#
 # Author: Jorge Chang
 #
 # See license in LICENSE file.
@@ -13,10 +9,12 @@
 # basic functionaliy like create table, update table, list tables, execute queries / DMLs, etc.
 #
 
-import json
 import abc
-import re
+import json
 import pprint
+import re
+
+from onefold_util import execute, execute_and_read
 
 
 class DataWarehouse:
@@ -353,3 +351,137 @@ class Hive(DataWarehouse):
       output['rows'].append({"f": f})
 
     return output
+
+
+# Implementation for Google BigQuery
+class GBigQuery(DataWarehouse):
+
+  project_id = None
+  bucket_id = None
+
+  def __init__(self, project_id, bucket_id):
+    print '-- Initializing Google BigQuery module --'
+    self.project_id = project_id
+    self.bucket_id = bucket_id 
+
+  def create_dataset(self, database_name):
+    command = "bq --project_id %s mk %s" % (self.project_id, database_name)
+    execute(command, ignore_error=True)
+
+  def delete_dataset(self, database_name):
+    pass
+
+  def create_table(self, database_name, table_name, schema_fields, process_array = "child_table"):
+    
+    table_columns = {}
+
+    for field in schema_fields:
+      data_type = field['data_type']
+
+      # ignore record
+      if field['data_type'] in ('record'):
+        continue
+
+      if data_type is not None:
+        if field['mode'] == 'repeated':
+          if process_array == "child_table":
+            child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key']).lower()
+            column_name = "value"
+          else:
+            continue
+        else:
+          if "." in field['key']:
+            if process_array == "child_table":
+              child_table_name = table_name + "_" + re.sub("[^0-9a-zA-Z_]", '_', field['key'].rsplit(".",1)[0]).lower()
+              column_name = field['key'].rsplit(".",1)[1]
+              print "  Child Table column:" + column_name
+            else:
+              child_table_name = table_name
+              column_name = field['key'].split(".",1)[0]
+              data_type = "string"
+              print "  Inline column:" + column_name
+          else:
+            child_table_name = table_name
+            column_name = field['key']
+
+        if child_table_name not in table_columns:
+          table_columns[child_table_name] = []
+          if child_table_name != table_name:
+            table_columns[child_table_name].append({"name": "parent_hash_code", "type": "string", "mode": "nullable"})
+            table_columns[child_table_name].append({"name": "hash_code", "type": "string", "mode": "nullable"})
+
+        table_columns[child_table_name].append({"name": column_name, "type": data_type, "mode": "nullable"})
+
+    for table_name, columns in table_columns.iteritems():
+
+      # create schema file
+      schema_file_name = table_name + "_schema.json"
+      schema_json = json.dumps(columns)
+      schema_file = open(schema_file_name, "w")
+      schema_file.write(schema_json)
+      schema_file.close()
+
+      # execute create-table command
+      command = "bq --project_id %s mk --schema %s %s.%s" % (self.project_id, schema_file_name,
+                                                             database_name, table_name)
+      execute(command)
+
+    return table_columns.keys()
+
+  def update_table(self, database_name, table_name, schema_fields):
+    # Currently BigQuery doesn't support update table
+    raise Exception("BigQuery doesn't support table update.")
+
+  def delete_table(self, database_name, table_name):
+    command = "bq --project_id %s rm -f %s.%s" % (self.project_id, database_name, table_name)
+    execute(command, ignore_error=True)
+      
+    child_table_names = self.list_tables(database_name, table_name)
+    for child_table_name in child_table_names:
+      command = "bq --project_id %s rm -f %s.%s" % (self.project_id, database_name, child_table_name)
+      execute(command, ignore_error=True)
+      # sql = "drop table if exists `%s`" % (child_table_name)
+      # self.execute_sql(database_name, sql, False)
+
+  def get_num_rows(self, database_name, table_name):
+    sql = "select count(*) from `%s`" % (table_name)
+    r = self.execute_sql(database_name, sql, True)
+    return r[0][0]
+
+  def table_exists(self, database_name, table_name):
+      
+    all_tables = self.list_tables(database_name, table_name)
+    for table in all_tables:
+        if table == table_name:
+            return True
+    
+    return False      
+
+  def get_table_schema(self, database_name, table_name):
+    pass
+
+  def get_job_state(self, job_id):
+    job_state = None
+    job_result = None
+    job_error_message = None
+    job_error_reason = None
+    job_output_rows = 0
+
+    return (job_state, job_result, job_error_message, job_error_reason, job_output_rows)
+
+  def list_tables(self, database_name, table_prefix):
+    output = []
+    (rc, stdout_lines, stderr_lines) = execute_and_read("bq --project_id %s --format csv ls %s" % (self.project_id, database_name))
+    for line in stdout_lines:
+      table_name = line.split(",")[0]
+      if table_name.startswith(table_prefix):
+        output.append(table_name)
+    return output
+
+  def load_table(self, database_name, table_name, file_path):
+    command = "bq --project_id %s --nosync load --source_format NEWLINE_DELIMITED_JSON %s.%s gs://%s/%s*" % \
+                  (self.project_id, database_name, table_name, self.bucket_id, file_path)
+    execute(command)
+
+  def query(self, database_name, query):
+    pass
